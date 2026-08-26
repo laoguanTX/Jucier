@@ -84,6 +84,16 @@ class _JucierShellState extends State<JucierShell> {
   double? _progress;
   bool _settingsOpen = false;
 
+  // Mirrors the settings reveal progress so the ripple ring can be painted
+  // above the page stack (in particular the home screen's drag target frame)
+  // while the settings page animates in and out.
+  final ValueNotifier<double> _settingsRevealProgress = ValueNotifier<double>(0);
+
+  // Per-entry transitions whose status listener is already attached. The
+  // AnimatedSwitcher may re-invoke the transition builder with the same
+  // animation instance, which would otherwise stack duplicate listeners.
+  final Set<Animation<double>> _listenedSettingsTransitions = {};
+
   bool get _busy => _operationLabel != null;
 
   @override
@@ -97,6 +107,7 @@ class _JucierShellState extends State<JucierShell> {
 
   @override
   void dispose() {
+    _settingsRevealProgress.dispose();
     widget.fileAccessService.setOpenSettingsHandler(null);
     super.dispose();
   }
@@ -127,14 +138,35 @@ class _JucierShellState extends State<JucierShell> {
                   progress: _progress,
                   onCancel: widget.engine.cancel,
                 ),
-          child: AnimatedSwitcher(
-            duration: const Duration(milliseconds: 460),
-            reverseDuration: const Duration(milliseconds: 340),
-            switchInCurve: Curves.easeOutCubic,
-            switchOutCurve: Curves.easeInCubic,
-            transitionBuilder: (child, animation) =>
-                _buildPageTransition(context, child, animation),
-            child: _buildCurrentPage(),
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              AnimatedSwitcher(
+                duration: const Duration(milliseconds: 460),
+                reverseDuration: const Duration(milliseconds: 340),
+                switchInCurve: Curves.easeOutCubic,
+                switchOutCurve: Curves.easeInCubic,
+                transitionBuilder: (child, animation) =>
+                    _buildPageTransition(context, child, animation),
+                child: _buildCurrentPage(),
+              ),
+              // The ripple ring must stay above the page stack (the home
+              // screen's drag target frame in particular) while the settings
+              // page animates closed, so it is painted in an overlay that
+              // tracks the reveal progress instead of inside the page
+              // transition.
+              IgnorePointer(
+                child: ValueListenableBuilder<double>(
+                  valueListenable: _settingsRevealProgress,
+                  builder: (context, progress, _) => CustomPaint(
+                    painter: _CircularRipplePainter(
+                      progress,
+                      context.theme.colors.primary,
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
       ),
@@ -181,25 +213,38 @@ class _JucierShellState extends State<JucierShell> {
       return FadeTransition(opacity: animation, child: child);
     }
 
+    if (_listenedSettingsTransitions.add(animation)) {
+      // The AnimatedSwitcher detaches an outgoing entry in the same frame its
+      // reverse animation completes, before the entry ever rebuilds with the
+      // final value of 0.0, so the progress published from the builder below
+      // gets stuck a fraction above zero and a sliver of the ripple ring stays
+      // at the settings origin. Watching the animation status guarantees the
+      // terminal progress (0.0 when closed, 1.0 when open) is always reached.
+      animation.addStatusListener((status) {
+        if (!mounted) return;
+        if (status == AnimationStatus.dismissed) {
+          _listenedSettingsTransitions.remove(animation);
+          _settingsRevealProgress.value = 0;
+        } else if (status == AnimationStatus.completed) {
+          _settingsRevealProgress.value = 1;
+        }
+      });
+    }
+
     return AnimatedBuilder(
       key: const ValueKey('settings-circular-reveal'),
       animation: animation,
       child: child,
       builder: (context, child) {
         final progress = Curves.easeOutCubic.transform(animation.value);
-        return Stack(
-          fit: StackFit.expand,
-          children: [
-            ClipPath(clipper: _CircularRevealClipper(progress), child: child),
-            IgnorePointer(
-              child: CustomPaint(
-                painter: _CircularRipplePainter(
-                  progress,
-                  context.theme.colors.primary,
-                ),
-              ),
-            ),
-          ],
+        // Publishing happens post-frame because the value listener would
+        // otherwise call markNeedsBuild while the widget tree is building.
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _settingsRevealProgress.value = progress;
+        });
+        return ClipPath(
+          clipper: _CircularRevealClipper(progress),
+          child: child,
         );
       },
     );

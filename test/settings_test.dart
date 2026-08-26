@@ -1,8 +1,10 @@
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:forui/forui.dart';
 import 'package:jucier/app.dart';
 import 'package:jucier/archive/archive_engine.dart';
 import 'package:jucier/platform/file_access_service.dart';
+import 'package:jucier/platform/theme_preference_store.dart';
 import 'package:material_ui/material_ui.dart';
 
 void main() {
@@ -12,7 +14,11 @@ void main() {
     final permissions = _FakeFileAccessService();
 
     await tester.pumpWidget(
-      JucierApp(engine: _UnusedArchiveEngine(), fileAccessService: permissions),
+      JucierApp(
+        engine: _UnusedArchiveEngine(),
+        fileAccessService: permissions,
+        themePreferenceStore: _FakeThemePreferenceStore(),
+      ),
     );
     await tester.pumpAndSettle();
 
@@ -28,15 +34,21 @@ void main() {
     expect(find.text('授权由 macOS 系统选择器完成，Jucier 只会访问你明确选择的文件夹。'), findsNothing);
 
     final viewCenter = tester.getCenter(find.byType(MaterialApp));
-    final cardCenter = tester.getCenter(
+    final appearanceCard = tester.getRect(
+      find.byKey(const ValueKey('settings-appearance-card')),
+    );
+    final permissionCard = tester.getRect(
       find.byKey(const ValueKey('settings-permission-card')),
     );
     final actionCenter = tester.getCenter(
       find.byKey(const ValueKey('settings-permission-action')),
     );
-    expect((cardCenter.dx - viewCenter.dx).abs(), lessThan(1));
-    expect((cardCenter.dy - viewCenter.dy).abs(), lessThan(1));
-    expect((actionCenter.dy - cardCenter.dy).abs(), lessThan(1));
+    expect((appearanceCard.center.dx - viewCenter.dx).abs(), lessThan(1));
+    expect((permissionCard.center.dx - viewCenter.dx).abs(), lessThan(1));
+    expect(appearanceCard.bottom, lessThan(permissionCard.top));
+    final cardsCenterY = (appearanceCard.top + permissionCard.bottom) / 2;
+    expect((cardsCenterY - viewCenter.dy).abs(), lessThan(1));
+    expect((actionCenter.dy - permissionCard.center.dy).abs(), lessThan(1));
 
     final icon = tester.widget<Icon>(
       find.byKey(const ValueKey('settings-permission-icon')),
@@ -60,7 +72,11 @@ void main() {
     );
 
     await tester.pumpWidget(
-      JucierApp(engine: _UnusedArchiveEngine(), fileAccessService: permissions),
+      JucierApp(
+        engine: _UnusedArchiveEngine(),
+        fileAccessService: permissions,
+        themePreferenceStore: _FakeThemePreferenceStore(),
+      ),
     );
     await tester.pumpAndSettle();
 
@@ -84,7 +100,11 @@ void main() {
     );
 
     await tester.pumpWidget(
-      JucierApp(engine: _UnusedArchiveEngine(), fileAccessService: permissions),
+      JucierApp(
+        engine: _UnusedArchiveEngine(),
+        fileAccessService: permissions,
+        themePreferenceStore: _FakeThemePreferenceStore(),
+      ),
     );
     await tester.pumpAndSettle();
 
@@ -92,6 +112,48 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('文件与文件夹访问'), findsOneWidget);
+  });
+
+  testWidgets('loads, switches, and persists the selected appearance', (
+    tester,
+  ) async {
+    final preferences = _FakeThemePreferenceStore(ThemeMode.dark);
+    final permissions = _FakeFileAccessService(
+      initialStatus: const FileAccessStatus(requested: true, granted: true),
+    );
+
+    await tester.pumpWidget(
+      JucierApp(
+        engine: _UnusedArchiveEngine(),
+        fileAccessService: permissions,
+        themePreferenceStore: preferences,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      tester.widget<MaterialApp>(find.byType(MaterialApp)).themeMode,
+      ThemeMode.dark,
+    );
+
+    await tester.tap(find.text('设置'));
+    await tester.pumpAndSettle();
+    expect(find.text('外观'), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('theme-mode-light')));
+    await tester.pumpAndSettle();
+
+    expect(
+      tester.widget<MaterialApp>(find.byType(MaterialApp)).themeMode,
+      ThemeMode.light,
+    );
+    expect(preferences.savedModes, [ThemeMode.light]);
+    expect(
+      tester
+          .widget<FButton>(find.byKey(const ValueKey('theme-mode-light')))
+          .variant,
+      FButtonVariant.primary,
+    );
   });
 }
 
@@ -129,4 +191,20 @@ class _FakeFileAccessService implements FileAccessService {
 class _UnusedArchiveEngine implements ArchiveEngine {
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+class _FakeThemePreferenceStore implements ThemePreferenceStore {
+  _FakeThemePreferenceStore([this.mode = ThemeMode.system]);
+
+  ThemeMode mode;
+  final List<ThemeMode> savedModes = [];
+
+  @override
+  Future<ThemeMode> load() async => mode;
+
+  @override
+  Future<void> save(ThemeMode mode) async {
+    this.mode = mode;
+    savedModes.add(mode);
+  }
 }

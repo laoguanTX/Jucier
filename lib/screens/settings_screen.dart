@@ -1,16 +1,21 @@
 import 'package:flutter/widgets.dart';
 import 'package:forui/forui.dart';
+import 'package:material_ui/material_ui.dart' show ThemeMode;
 
 import '../platform/file_access_service.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({
     required this.fileAccessService,
+    required this.themeMode,
     required this.onBack,
+    this.onThemeModeChanged,
     super.key,
   });
 
   final FileAccessService fileAccessService;
+  final ThemeMode themeMode;
+  final ValueChanged<ThemeMode>? onThemeModeChanged;
   final VoidCallback onBack;
 
   @override
@@ -45,7 +50,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final colors = context.theme.colors;
     final status = _status;
     final granted = status?.granted ?? false;
 
@@ -56,18 +60,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
           Positioned(
             top: 0,
             left: 0,
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                FButton(
-                  key: const ValueKey('settings-back-button'),
-                  size: FButtonSizeVariant.sm,
-                  variant: FButtonVariant.ghost,
-                  onPress: widget.onBack,
-                  prefix: const Icon(FLucideIcons.arrowLeft, size: 17),
-                  child: const Text('返回'),
-                ),
-              ],
+            child: FButton(
+              key: const ValueKey('settings-back-button'),
+              size: FButtonSizeVariant.sm,
+              variant: FButtonVariant.ghost,
+              onPress: widget.onBack,
+              prefix: const Icon(FLucideIcons.arrowLeft, size: 17),
+              child: const Text('返回'),
             ),
           ),
           Align(
@@ -82,57 +81,55 @@ class _SettingsScreenState extends State<SettingsScreen> {
           Center(
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 680),
-              child: Container(
-                key: const ValueKey('settings-permission-card'),
-                padding: const EdgeInsets.all(20),
-                decoration: BoxDecoration(
-                  color: colors.background,
-                  border: Border.all(color: colors.border),
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    Container(
-                      width: 48,
-                      height: 48,
-                      decoration: BoxDecoration(
-                        color: colors.secondary,
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                      child: Icon(
-                        FLucideIcons.folderOpen,
-                        key: const ValueKey('settings-permission-icon'),
-                        size: 22,
-                        color: colors.foreground,
-                      ),
-                    ),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.start,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _SettingsCard(
+                    key: const ValueKey('settings-appearance-card'),
+                    icon: FLucideIcons.sun,
+                    title: '外观',
+                    description: '选择跟随系统、浅色或深色外观。',
+                    trailing: SizedBox(
+                      width: 294,
+                      child: Row(
                         children: [
-                          Text(
-                            '文件与文件夹访问',
-                            style: context.theme.typography.body.lg.copyWith(
-                              fontWeight: FontWeight.w600,
-                            ),
+                          _ThemeModeButton(
+                            mode: ThemeMode.system,
+                            label: '系统',
+                            icon: FLucideIcons.monitor,
+                            selectedMode: widget.themeMode,
+                            onChanged: widget.onThemeModeChanged,
                           ),
-                          const SizedBox(height: 6),
-                          Text(
-                            granted
-                                ? '已授权：${status?.directory ?? '已选择的文件夹'}'
-                                : '选择 Jucier 可以打开、创建和解压文件的位置。',
-                            style: context.theme.typography.body.sm.copyWith(
-                              color: colors.mutedForeground,
-                            ),
+                          const SizedBox(width: 6),
+                          _ThemeModeButton(
+                            mode: ThemeMode.light,
+                            label: '浅色',
+                            icon: FLucideIcons.sun,
+                            selectedMode: widget.themeMode,
+                            onChanged: widget.onThemeModeChanged,
+                          ),
+                          const SizedBox(width: 6),
+                          _ThemeModeButton(
+                            mode: ThemeMode.dark,
+                            label: '深色',
+                            icon: FLucideIcons.moon,
+                            selectedMode: widget.themeMode,
+                            onChanged: widget.onThemeModeChanged,
                           ),
                         ],
                       ),
                     ),
-                    const SizedBox(width: 20),
-                    FButton(
+                  ),
+                  const SizedBox(height: 14),
+                  _SettingsCard(
+                    key: const ValueKey('settings-permission-card'),
+                    icon: FLucideIcons.folderOpen,
+                    iconKey: const ValueKey('settings-permission-icon'),
+                    title: '文件与文件夹访问',
+                    description: granted
+                        ? '已授权：${status?.directory ?? '已选择的文件夹'}'
+                        : '选择 Jucier 可以打开、创建和解压文件的位置。',
+                    trailing: FButton(
                       key: const ValueKey('settings-permission-action'),
                       size: FButtonSizeVariant.sm,
                       variant: granted
@@ -147,8 +144,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             : '授权…',
                       ),
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
           ),
@@ -156,4 +153,102 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
     );
   }
+}
+
+class _SettingsCard extends StatelessWidget {
+  const _SettingsCard({
+    required this.icon,
+    required this.title,
+    required this.description,
+    required this.trailing,
+    this.iconKey,
+    super.key,
+  });
+
+  final IconData icon;
+  final String title;
+  final String description;
+  final Widget trailing;
+  final Key? iconKey;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.theme.colors;
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: colors.background,
+        border: Border.all(color: colors.border),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Container(
+            width: 48,
+            height: 48,
+            decoration: BoxDecoration(
+              color: colors.secondary,
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Icon(icon, key: iconKey, size: 22, color: colors.foreground),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: context.theme.typography.body.lg.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  description,
+                  style: context.theme.typography.body.sm.copyWith(
+                    color: colors.mutedForeground,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 20),
+          trailing,
+        ],
+      ),
+    );
+  }
+}
+
+class _ThemeModeButton extends StatelessWidget {
+  const _ThemeModeButton({
+    required this.mode,
+    required this.label,
+    required this.icon,
+    required this.selectedMode,
+    required this.onChanged,
+  });
+
+  final ThemeMode mode;
+  final String label;
+  final IconData icon;
+  final ThemeMode selectedMode;
+  final ValueChanged<ThemeMode>? onChanged;
+
+  @override
+  Widget build(BuildContext context) => Expanded(
+    child: FButton(
+      key: ValueKey('theme-mode-${mode.name}'),
+      size: FButtonSizeVariant.sm,
+      variant: mode == selectedMode
+          ? FButtonVariant.primary
+          : FButtonVariant.outline,
+      onPress: onChanged == null ? null : () => onChanged!(mode),
+      prefix: Icon(icon, size: 15),
+      child: Text(label),
+    ),
+  );
 }

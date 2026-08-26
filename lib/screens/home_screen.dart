@@ -40,23 +40,37 @@ class _HomeScreenState extends State<HomeScreen> {
         padding: const EdgeInsets.all(24),
         child: Column(
           children: [
-            Row(
-              children: [
-                Text(
-                  'jucier',
-                  style: context.theme.typography.display.xl2.copyWith(
-                    fontWeight: FontWeight.w700,
+            SizedBox(
+              // Keeps the settings button vertically centered in the same band
+              // as the display.xl2 brand title, right-aligned at the end of
+              // the bar.
+              height: 40,
+              child: Stack(
+                children: [
+                  Center(
+                    child: Text(
+                      'Jucier',
+                      style: context.theme.typography.display.xl2.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
                   ),
-                ),
-                const Spacer(),
-                FButton(
-                  size: FButtonSizeVariant.sm,
-                  variant: FButtonVariant.ghost,
-                  onPress: widget.onSettings,
-                  prefix: const Icon(FLucideIcons.settings, size: 17),
-                  child: const Text('设置'),
-                ),
-              ],
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: FButton(
+                      // FButton defaults to mainAxisSize.max and would stretch
+                      // to fill the whole bar; keep it intrinsic so it hugs
+                      // the right edge without covering the centered title.
+                      mainAxisSize: MainAxisSize.min,
+                      size: FButtonSizeVariant.sm,
+                      variant: FButtonVariant.ghost,
+                      onPress: widget.onSettings,
+                      prefix: const Icon(FLucideIcons.settings, size: 17),
+                      child: const Text('设置'),
+                    ),
+                  ),
+                ],
+              ),
             ),
             const SizedBox(height: 18),
             Expanded(

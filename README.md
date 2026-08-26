@@ -5,6 +5,16 @@ A focused macOS archive utility built with Flutter, Forui, and the official
 create an archive, drop an archive to browse it, and keep the current operation
 visible in a compact footer.
 
+## Project structure
+
+- `lib/app.dart`: application bootstrap, global theme, and dependency wiring.
+- `lib/application/`: single-window navigation and app-level transitions.
+- `lib/archive/`: archive domain models, supported formats, and the 7-Zip engine.
+- `lib/screens/`: full-page presentation widgets.
+- `lib/dialogs/`: focused user-input flows.
+- `lib/platform/`: native platform-channel services.
+- `lib/widgets/`: reusable presentation components.
+
 ## Current features
 
 - Browse 7-Zip's supported archive formats with nested folder navigation.
@@ -13,7 +23,7 @@ visible in a compact footer.
 - Extract with overwrite, skip, or automatic rename conflict behavior.
 - Test archive integrity, show progress, and cancel the active operation.
 - Drag and drop plus native macOS open/save panels.
-- Automatic light and dark desktop themes from Forui.
+- System, light, and dark desktop themes with a persistent appearance setting.
 
 ## Requirements
 

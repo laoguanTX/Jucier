@@ -6,6 +6,7 @@ class MainFlutterWindow: NSWindow {
   private let bookmarkKey = "fileAccessBookmark"
   private let bookmarkPathKey = "fileAccessBookmarkPath"
   private let permissionRequestedKey = "fileAccessPermissionRequested"
+  private let themeModeKey = "themeMode"
   private var scopedURL: URL?
 
   override func awakeFromNib() {
@@ -16,6 +17,14 @@ class MainFlutterWindow: NSWindow {
     self.minSize = NSSize(width: 720, height: 520)
     self.setContentSize(NSSize(width: 860, height: 620))
     self.center()
+
+    // Hide the system-drawn title text while keeping the native traffic-light
+    // buttons, which float over the top-left corner of the Flutter content.
+    self.title = "Jucier"
+    self.titleVisibility = .hidden
+    self.titlebarAppearsTransparent = true
+    self.styleMask.insert(.fullSizeContentView)
+    applyThemeMode(storedThemeMode())
 
     RegisterGeneratedPlugins(registry: flutterViewController)
     configurePlatformChannel(flutterViewController)
@@ -36,9 +45,43 @@ class MainFlutterWindow: NSWindow {
         result(self.fileAccessStatus())
       case "requestFileAccess":
         self.requestFileAccess(result: result)
+      case "themeMode":
+        result(self.storedThemeMode())
+      case "setThemeMode":
+        self.setThemeMode(call.arguments, result: result)
       default:
         result(FlutterMethodNotImplemented)
       }
+    }
+  }
+
+  private func storedThemeMode() -> String {
+    UserDefaults.standard.string(forKey: themeModeKey) ?? "system"
+  }
+
+  private func setThemeMode(_ value: Any?, result: FlutterResult) {
+    guard let mode = value as? String,
+      ["system", "light", "dark"].contains(mode) else {
+      result(FlutterError(
+        code: "invalid_theme_mode",
+        message: "不支持的外观模式",
+        details: value))
+      return
+    }
+
+    UserDefaults.standard.set(mode, forKey: themeModeKey)
+    applyThemeMode(mode)
+    result(nil)
+  }
+
+  private func applyThemeMode(_ mode: String) {
+    switch mode {
+    case "light":
+      appearance = NSAppearance(named: .aqua)
+    case "dark":
+      appearance = NSAppearance(named: .darkAqua)
+    default:
+      appearance = nil
     }
   }
 

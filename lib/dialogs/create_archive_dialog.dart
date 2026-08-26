@@ -7,49 +7,55 @@ import '../archive/archive_options.dart';
 
 enum SourcePickerChoice { files, folder }
 
-Future<SourcePickerChoice?> showSourcePicker(BuildContext context) => showFDialog<SourcePickerChoice>(
-  context: context,
-  builder: (context, _, animation) => FDialog(
-    animation: animation,
-    constraints: const BoxConstraints(minWidth: 390, maxWidth: 430),
-    builder: (context, style) => Padding(
-      padding: const EdgeInsets.all(22),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('创建压缩包', style: style.titleTextStyle),
-          const SizedBox(height: 8),
-          Text('选择要添加的内容', style: style.bodyTextStyle),
-          const SizedBox(height: 20),
-          FButton(
-            onPress: () => Navigator.of(context).pop(SourcePickerChoice.files),
-            prefix: const Icon(FLucideIcons.files, size: 17),
-            child: const Text('选择文件'),
-          ),
-          const SizedBox(height: 8),
-          FButton(
-            variant: FButtonVariant.outline,
-            onPress: () => Navigator.of(context).pop(SourcePickerChoice.folder),
-            prefix: const Icon(FLucideIcons.folder, size: 17),
-            child: const Text('选择文件夹'),
-          ),
-        ],
-      ),
-    ),
-  ),
-);
-
-Future<CreateArchiveOptions?> showCreateArchiveDialog(BuildContext context, {required List<String> sources}) =>
-    showFDialog<CreateArchiveOptions>(
+Future<SourcePickerChoice?> showSourcePicker(BuildContext context) =>
+    showFDialog<SourcePickerChoice>(
       context: context,
-      barrierDismissible: false,
       builder: (context, _, animation) => FDialog(
         animation: animation,
-        constraints: const BoxConstraints(minWidth: 500, maxWidth: 560),
-        builder: (context, style) => _CreateArchiveForm(style: style, sources: sources),
+        constraints: const BoxConstraints(minWidth: 390, maxWidth: 430),
+        builder: (context, style) => Padding(
+          padding: const EdgeInsets.all(22),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('创建压缩包', style: style.titleTextStyle),
+              const SizedBox(height: 8),
+              Text('选择要添加的内容', style: style.bodyTextStyle),
+              const SizedBox(height: 20),
+              FButton(
+                onPress: () =>
+                    Navigator.of(context).pop(SourcePickerChoice.files),
+                prefix: const Icon(FLucideIcons.files, size: 17),
+                child: const Text('选择文件'),
+              ),
+              const SizedBox(height: 8),
+              FButton(
+                variant: FButtonVariant.outline,
+                onPress: () =>
+                    Navigator.of(context).pop(SourcePickerChoice.folder),
+                prefix: const Icon(FLucideIcons.folder, size: 17),
+                child: const Text('选择文件夹'),
+              ),
+            ],
+          ),
+        ),
       ),
     );
+
+Future<CreateArchiveOptions?> showCreateArchiveDialog(
+  BuildContext context, {
+  required List<String> sources,
+}) => showFDialog<CreateArchiveOptions>(
+  context: context,
+  barrierDismissible: false,
+  builder: (context, _, animation) => FDialog(
+    animation: animation,
+    constraints: const BoxConstraints(minWidth: 500, maxWidth: 560),
+    builder: (context, style) =>
+        _CreateArchiveForm(style: style, sources: sources),
+  ),
+);
 
 class _CreateArchiveForm extends StatefulWidget {
   const _CreateArchiveForm({required this.style, required this.sources});
@@ -73,8 +79,12 @@ class _CreateArchiveFormState extends State<_CreateArchiveForm> {
   void initState() {
     super.initState();
     final first = widget.sources.first;
-    final base = widget.sources.length == 1 ? p.basenameWithoutExtension(first) : 'Archive';
-    _pathController = TextEditingController(text: p.join(p.dirname(first), '$base.7z'));
+    final base = widget.sources.length == 1
+        ? p.basenameWithoutExtension(first)
+        : 'Archive';
+    _pathController = TextEditingController(
+      text: p.join(p.dirname(first), '$base.7z'),
+    );
   }
 
   @override
@@ -95,7 +105,10 @@ class _CreateArchiveFormState extends State<_CreateArchiveForm> {
         children: [
           Text('创建压缩包', style: widget.style.titleTextStyle),
           const SizedBox(height: 6),
-          Text('${widget.sources.length} 个来源', style: widget.style.bodyTextStyle),
+          Text(
+            '${widget.sources.length} 个来源',
+            style: widget.style.bodyTextStyle,
+          ),
           const SizedBox(height: 18),
           Row(
             crossAxisAlignment: CrossAxisAlignment.end,
@@ -103,7 +116,10 @@ class _CreateArchiveFormState extends State<_CreateArchiveForm> {
               Expanded(
                 child: TextField(
                   controller: _pathController,
-                  decoration: InputDecoration(labelText: '保存位置', errorText: _error),
+                  decoration: InputDecoration(
+                    labelText: '保存位置',
+                    errorText: _error,
+                  ),
                 ),
               ),
               const SizedBox(width: 8),
@@ -124,7 +140,10 @@ class _CreateArchiveFormState extends State<_CreateArchiveForm> {
                   decoration: const InputDecoration(labelText: '格式'),
                   items: [
                     for (final format in ArchiveFormat.values)
-                      DropdownMenuItem(value: format, child: Text(format.label)),
+                      DropdownMenuItem(
+                        value: format,
+                        child: Text(format.label),
+                      ),
                   ],
                   onChanged: _changeFormat,
                 ),
@@ -151,10 +170,14 @@ class _CreateArchiveFormState extends State<_CreateArchiveForm> {
           const SizedBox(height: 8),
           TextField(
             controller: _passwordController,
-            enabled: _format == ArchiveFormat.sevenZip || _format == ArchiveFormat.zip,
+            enabled:
+                _format == ArchiveFormat.sevenZip ||
+                _format == ArchiveFormat.zip,
             obscureText: true,
             decoration: InputDecoration(
-              labelText: _format == ArchiveFormat.sevenZip || _format == ArchiveFormat.zip
+              labelText:
+                  _format == ArchiveFormat.sevenZip ||
+                      _format == ArchiveFormat.zip
                   ? '密码（可选）'
                   : '${_format.label} 不支持密码',
             ),
@@ -182,7 +205,11 @@ class _CreateArchiveFormState extends State<_CreateArchiveForm> {
                 child: const Text('取消'),
               ),
               const SizedBox(width: 8),
-              FButton(size: FButtonSizeVariant.sm, onPress: _submit, child: const Text('创建')),
+              FButton(
+                size: FButtonSizeVariant.sm,
+                onPress: _submit,
+                child: const Text('创建'),
+              ),
             ],
           ),
         ],
@@ -230,8 +257,12 @@ class _CreateArchiveFormState extends State<_CreateArchiveForm> {
         sources: widget.sources,
         format: _format,
         compressionLevel: _level.round(),
-        password: _passwordController.text.trim().isEmpty ? null : _passwordController.text,
-        volumeSize: _volumeController.text.trim().isEmpty ? null : _volumeController.text.trim(),
+        password: _passwordController.text.trim().isEmpty
+            ? null
+            : _passwordController.text,
+        volumeSize: _volumeController.text.trim().isEmpty
+            ? null
+            : _volumeController.text.trim(),
       ),
     );
   }

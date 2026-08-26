@@ -1,0 +1,65 @@
+import 'dart:async';
+
+import 'package:flutter_test/flutter_test.dart';
+import 'package:jucier/application/archive_workflow_controller.dart';
+import 'package:jucier/archive/archive_engine.dart';
+import 'package:jucier/archive/archive_entry.dart';
+import 'package:jucier/archive/archive_options.dart';
+
+void main() {
+  test(
+    'owns archive state and clears operation state after completion',
+    () async {
+      final engine = _FakeArchiveEngine();
+      final controller = ArchiveWorkflowController(engine);
+
+      await controller.open('/tmp/example.zip', password: 'secret');
+      expect(controller.listing?.archivePath, '/tmp/example.zip');
+      expect(controller.password, 'secret');
+
+      final create = controller.create(
+        const CreateArchiveOptions(
+          archivePath: '/tmp/output.7z',
+          sources: ['/tmp/input'],
+          format: ArchiveFormat.sevenZip,
+        ),
+      );
+
+      expect(controller.busy, isTrue);
+      expect(controller.operationLabel, '正在创建 output.7z');
+      expect(controller.progress, 0.4);
+
+      engine.completeCreate();
+      await create;
+      expect(controller.busy, isFalse);
+      expect(controller.operationLabel, isNull);
+      expect(controller.progress, isNull);
+
+      controller.closeArchive();
+      expect(controller.listing, isNull);
+      expect(controller.password, isNull);
+    },
+  );
+}
+
+class _FakeArchiveEngine implements ArchiveEngine {
+  final Completer<void> _createCompleter = Completer<void>();
+
+  void completeCreate() => _createCompleter.complete();
+
+  @override
+  Future<ArchiveListing> list(String archivePath, {String? password}) async =>
+      ArchiveListing(archivePath: archivePath, entries: const []);
+
+  @override
+  Future<void> create(
+    CreateArchiveOptions options, {
+    ProgressCallback? onProgress,
+  }) {
+    onProgress?.call(0.4);
+    return _createCompleter.future;
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}

@@ -9,6 +9,34 @@ import 'package:jucier/platform/theme_preference_store.dart';
 import 'package:material_ui/material_ui.dart' show ThemeMode;
 
 void main() {
+  testWidgets('create archive opens the reusable compose file tree', (
+    tester,
+  ) async {
+    final permissions = _FakeFileAccessService(
+      initialStatus: const FileAccessStatus(
+        requested: true,
+        granted: true,
+        directory: '/Users/example',
+      ),
+    );
+
+    await tester.pumpWidget(
+      JucierApp(
+        engine: _UnusedArchiveEngine(),
+        fileAccessService: permissions,
+        themePreferenceStore: _FakeThemePreferenceStore(),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.widgetWithText(FButton, '创建压缩包'));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('archive-compose-page')), findsOneWidget);
+    expect(find.text('尚未导入文件'), findsOneWidget);
+    expect(find.text('导入'), findsOneWidget);
+  });
+
   testWidgets('home header keeps the title centered without overlapping the '
       'right-aligned settings button', (tester) async {
     final permissions = _FakeFileAccessService(

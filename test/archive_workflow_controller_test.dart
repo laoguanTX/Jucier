@@ -31,6 +31,8 @@ void main() {
 
       engine.completeCreate();
       await create;
+      expect(controller.listing?.archivePath, '/tmp/output.7z');
+      expect(controller.password, isNull);
       expect(controller.busy, isFalse);
       expect(controller.operationLabel, isNull);
       expect(controller.progress, isNull);

@@ -17,6 +17,9 @@ typedef ArchiveDropCallback = Future<void> Function(
   String directory,
 );
 typedef ArchiveDragCallback = Future<void> Function(List<ArchiveEntry> entries);
+typedef ArchiveImportCallback = Future<void> Function(String directory);
+
+enum ArchiveScreenMode { browse, compose }
 
 class ArchiveScreen extends StatefulWidget {
   const ArchiveScreen({
@@ -32,6 +35,9 @@ class ArchiveScreen extends StatefulWidget {
     required this.onDeleteEntries,
     required this.onDropped,
     required this.onDragEntries,
+    this.mode = ArchiveScreenMode.browse,
+    this.onImport,
+    this.onCreate,
     super.key,
   });
 
@@ -47,6 +53,9 @@ class ArchiveScreen extends StatefulWidget {
   final ArchiveEntriesCallback onDeleteEntries;
   final ArchiveDropCallback onDropped;
   final ArchiveDragCallback onDragEntries;
+  final ArchiveScreenMode mode;
+  final ArchiveImportCallback? onImport;
+  final VoidCallback? onCreate;
 
   @override
   State<ArchiveScreen> createState() => _ArchiveScreenState();
@@ -81,6 +90,7 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final composing = widget.mode == ArchiveScreenMode.compose;
     final colors = context.theme.colors;
     final entries = visibleArchiveEntries(
       widget.listing.entries,
@@ -101,7 +111,7 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
               FButton.icon(
                 variant: FButtonVariant.ghost,
                 onPress: widget.enabled ? widget.onClose : null,
-                semanticsLabel: '关闭压缩包',
+                semanticsLabel: composing ? '取消创建压缩包' : '关闭压缩包',
                 child: const Icon(FLucideIcons.x, size: 18),
               ),
               const SizedBox(width: 8),
@@ -111,7 +121,9 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      p.basename(widget.listing.archivePath),
+                      composing
+                          ? '新建压缩包'
+                          : p.basename(widget.listing.archivePath),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: context.theme.typography.body.lg.copyWith(
@@ -128,7 +140,31 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
                   ],
                 ),
               ),
-              if (_selectionMode) ...[
+              if (composing) ...[
+                FButton(
+                  key: const ValueKey('archive-import'),
+                  size: FButtonSizeVariant.sm,
+                  variant: FButtonVariant.ghost,
+                  onPress: widget.enabled && widget.onImport != null
+                      ? () => widget.onImport!(_directory)
+                      : null,
+                  prefix: const Icon(FLucideIcons.plus, size: 16),
+                  child: const Text('导入'),
+                ),
+                const SizedBox(width: 6),
+                FButton(
+                  key: const ValueKey('archive-create'),
+                  size: FButtonSizeVariant.sm,
+                  onPress:
+                      widget.enabled &&
+                          widget.listing.entries.isNotEmpty &&
+                          widget.onCreate != null
+                      ? widget.onCreate
+                      : null,
+                  prefix: const Icon(FLucideIcons.archive, size: 16),
+                  child: const Text('创建压缩包'),
+                ),
+              ] else if (_selectionMode) ...[
                 Text(
                   '已选择 ${_selectedEntries.length} 项',
                   style: context.theme.typography.body.sm.copyWith(
@@ -174,6 +210,19 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
                   child: const Text('完成'),
                 ),
               ] else ...[
+                if (widget.onImport != null) ...[
+                  FButton(
+                    key: const ValueKey('archive-import'),
+                    size: FButtonSizeVariant.sm,
+                    variant: FButtonVariant.ghost,
+                    onPress: widget.enabled
+                        ? () => widget.onImport!(_directory)
+                        : null,
+                    prefix: const Icon(FLucideIcons.plus, size: 16),
+                    child: const Text('导入'),
+                  ),
+                  const SizedBox(width: 6),
+                ],
                 FButton(
                   size: FButtonSizeVariant.sm,
                   variant: FButtonVariant.ghost,
@@ -214,7 +263,7 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
           child: entries.isEmpty
               ? Center(
                   child: Text(
-                    '此文件夹为空',
+                    composing ? '尚未导入文件' : '此文件夹为空',
                     style: context.theme.typography.body.md.copyWith(
                       color: colors.mutedForeground,
                     ),
@@ -241,9 +290,9 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
                       size: entry.size,
                       packedSize: entry.packedSize,
                       modified: entry.modified,
-                      selectionMode: _selectionMode,
+                      selectionMode: !composing && _selectionMode,
                       selected: _selectedEntries.containsKey(entry.path),
-                      onSelectionChanged: widget.enabled
+                      onSelectionChanged: widget.enabled && !composing
                           ? (selected) => _setEntrySelected(entry, selected)
                           : null,
                       onOpen: entry.isDirectory
@@ -252,10 +301,16 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
                                   ? entry.name
                                   : '$_directory/${entry.name}';
                             })
+                          : composing
+                          ? null
                           : () => widget.onPreviewEntry(entry),
-                      onExtract: () => widget.onExtractEntry(entry),
-                      onDelete: () => widget.onDeleteEntry(entry),
-                      onDragStarted: widget.enabled
+                      onExtract: composing
+                          ? null
+                          : () => widget.onExtractEntry(entry),
+                      onDelete: composing
+                          ? null
+                          : () => widget.onDeleteEntry(entry),
+                      onDragStarted: widget.enabled && !composing
                           ? () => _startDraggingEntry(entry)
                           : null,
                     );
@@ -320,7 +375,11 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
                       borderRadius: BorderRadius.circular(10),
                     ),
                     child: Text(
-                      _directory.isEmpty ? '添加到压缩包根目录' : '添加到 /$_directory',
+                      composing
+                          ? '导入到待压缩列表'
+                          : _directory.isEmpty
+                          ? '添加到压缩包根目录'
+                          : '添加到 /$_directory',
                       style: context.theme.typography.body.md.copyWith(
                         fontWeight: FontWeight.w600,
                       ),

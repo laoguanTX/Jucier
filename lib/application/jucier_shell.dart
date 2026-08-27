@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/foundation.dart';
@@ -25,6 +26,7 @@ import '../screens/archive_screen.dart';
 import '../screens/home_screen.dart';
 import '../screens/settings_screen.dart';
 import '../widgets/operation_progress.dart';
+import 'archive_draft.dart';
 import 'archive_workflow_controller.dart';
 import 'settings_page_transition.dart';
 
@@ -68,6 +70,14 @@ class _JucierShellState extends State<JucierShell> {
   int _nextDragId = 0;
   Future<void> _previewPromptQueue = Future.value();
   bool _settingsOpen = false;
+  bool _creatingArchive = false;
+  bool _draftLoading = false;
+  List<String> _draftSources = [];
+  ArchiveListing _draftListing = const ArchiveListing(
+    archivePath: '新建压缩包',
+    entries: [],
+    physicalSize: 0,
+  );
 
   @override
   void initState() {
@@ -149,12 +159,32 @@ class _JucierShellState extends State<JucierShell> {
         onBack: () => setState(() => _settingsOpen = false),
       );
     }
+    if (_creatingArchive) {
+      return ArchiveScreen(
+        key: const ValueKey('archive-compose-page'),
+        listing: _draftListing,
+        enabled: !_workflow.busy && !_draftLoading,
+        mode: ArchiveScreenMode.compose,
+        onClose: _closeArchiveDraft,
+        onExtract: () {},
+        onTest: () {},
+        onPreviewEntry: (_) {},
+        onExtractEntry: (_) {},
+        onDeleteEntry: (_) {},
+        onExtractEntries: (_) async => false,
+        onDeleteEntries: (_) async => false,
+        onImport: (_) => _pickDraftSources(),
+        onCreate: _createDraftArchive,
+        onDropped: (paths, _) => _addDraftSources(paths),
+        onDragEntries: (_) async {},
+      );
+    }
     if (_workflow.listing == null) {
       return HomeScreen(
         key: const ValueKey('home-page'),
         enabled: !_workflow.busy,
         onOpen: _pickArchive,
-        onCreate: _pickSources,
+        onCreate: _startArchiveDraft,
         onSettings: _openSettings,
         onDropped: _handleDroppedPaths,
       );
@@ -171,6 +201,7 @@ class _JucierShellState extends State<JucierShell> {
       onDeleteEntry: _deleteEntry,
       onExtractEntries: _extractEntries,
       onDeleteEntries: _deleteEntries,
+      onImport: _pickEntriesToAdd,
       onDropped: _addDroppedEntries,
       onDragEntries: _dragEntries,
     );
@@ -199,20 +230,70 @@ class _JucierShellState extends State<JucierShell> {
     if (file != null) await _openArchive(file.path);
   }
 
-  Future<void> _pickSources() async {
-    final choice = await showSourcePicker(context);
+  void _startArchiveDraft() {
+    setState(() {
+      _creatingArchive = true;
+      _draftLoading = false;
+      _draftSources = [];
+      _draftListing = const ArchiveListing(
+        archivePath: '新压缩包',
+        entries: [],
+        physicalSize: 0,
+      );
+    });
+  }
+
+  void _closeArchiveDraft() {
+    setState(() {
+      _creatingArchive = false;
+      _draftLoading = false;
+      _draftSources = [];
+    });
+  }
+
+  Future<void> _pickDraftSources() async {
+    final choice = await showSourcePicker(
+      context,
+      title: '导入到新压缩包',
+      description: '选择要压缩的文件或文件夹',
+    );
     if (!mounted || choice == null) return;
 
     final List<String> paths;
     if (choice == SourcePickerChoice.files) {
-      paths = (await openFiles(confirmButtonText: '选择'))
+      paths = (await openFiles(confirmButtonText: '导入'))
           .map((file) => file.path)
           .toList();
     } else {
-      final path = await getDirectoryPath(confirmButtonText: '选择文件夹');
+      final path = await getDirectoryPath(confirmButtonText: '导入文件夹');
       paths = [?path];
     }
-    if (paths.isNotEmpty && mounted) await _showCreateDialog(paths);
+    if (paths.isNotEmpty && mounted) await _addDraftSources(paths);
+  }
+
+  Future<void> _addDraftSources(List<String> paths) async {
+    if (paths.isEmpty || _draftLoading) return;
+    final nextSources = List<String>.of(_draftSources);
+    for (final path in paths) {
+      if (!nextSources.any((existing) => p.equals(existing, path))) {
+        nextSources.add(path);
+      }
+    }
+    setState(() => _draftLoading = true);
+    try {
+      final listing = await buildArchiveDraftListing(nextSources);
+      if (!mounted || !_creatingArchive) return;
+      setState(() {
+        _draftSources = nextSources;
+        _draftListing = listing;
+      });
+    } on FileSystemException catch (error) {
+      if (mounted) {
+        await showMessageDialog(context, title: '无法导入', message: error.message);
+      }
+    } finally {
+      if (mounted) setState(() => _draftLoading = false);
+    }
   }
 
   Future<void> _handleDroppedPaths(List<String> paths) async {
@@ -220,7 +301,8 @@ class _JucierShellState extends State<JucierShell> {
     if (paths.length == 1 && isSupportedArchivePath(paths.single)) {
       await _openArchive(paths.single);
     } else {
-      await _showCreateDialog(paths);
+      _startArchiveDraft();
+      await _addDraftSources(paths);
     }
   }
 
@@ -242,18 +324,22 @@ class _JucierShellState extends State<JucierShell> {
     }
   }
 
-  Future<void> _showCreateDialog(List<String> paths) async {
-    final options = await showCreateArchiveDialog(context, sources: paths);
+  Future<void> _createDraftArchive() async {
+    if (_draftSources.isEmpty || _workflow.busy) return;
+    final options = await showCreateArchiveDialog(
+      context,
+      sources: _draftSources,
+    );
     if (options == null || !mounted) return;
 
     try {
       await _workflow.create(options);
       if (mounted) {
-        await showMessageDialog(
-          context,
-          title: '压缩完成',
-          message: '已创建 ${options.archivePath}',
-        );
+        setState(() {
+          _creatingArchive = false;
+          _draftLoading = false;
+          _draftSources = [];
+        });
       }
     } on ArchiveCancelledException {
       // Explicit cancellations do not need an error dialog.
@@ -381,6 +467,31 @@ class _JucierShellState extends State<JucierShell> {
       if (mounted) {
         await showMessageDialog(context, title: '添加失败', message: error.message);
       }
+    }
+  }
+
+  Future<void> _pickEntriesToAdd(String directory) async {
+    if (_workflow.busy) return;
+    final choice = await showSourcePicker(
+      context,
+      title: '导入到压缩包',
+      description: directory.isEmpty
+          ? '选择要导入到根目录的内容'
+          : '选择要导入到 /$directory 的内容',
+    );
+    if (!mounted || choice == null) return;
+
+    final List<String> paths;
+    if (choice == SourcePickerChoice.files) {
+      paths = (await openFiles(confirmButtonText: '导入'))
+          .map((file) => file.path)
+          .toList();
+    } else {
+      final path = await getDirectoryPath(confirmButtonText: '导入文件夹');
+      paths = [?path];
+    }
+    if (paths.isNotEmpty && mounted) {
+      await _addDroppedEntries(paths, directory);
     }
   }
 

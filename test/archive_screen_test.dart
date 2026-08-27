@@ -109,6 +109,58 @@ void main() {
     expect(formatBytes(12 * 1024), '12.0 KB');
   });
 
+  testWidgets('compose mode starts with an importable file tree', (
+    tester,
+  ) async {
+    const emptyDraft = ArchiveListing(
+      archivePath: '新建压缩包',
+      entries: [],
+      physicalSize: 0,
+    );
+    var importCount = 0;
+    await _pumpArchiveScreen(
+      tester,
+      emptyDraft,
+      mode: ArchiveScreenMode.compose,
+      onImport: (_) async => importCount++,
+      onCreate: () {},
+    );
+
+    expect(find.text('尚未导入文件'), findsOneWidget);
+    expect(find.byKey(const ValueKey('archive-import')), findsOneWidget);
+    expect(find.byKey(const ValueKey('archive-create')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('archive-import')));
+    await tester.pumpAndSettle();
+    expect(importCount, 1);
+
+    final createButton = tester.widget<FButton>(
+      find.byKey(const ValueKey('archive-create')),
+    );
+    expect(createButton.onPress, isNull);
+  });
+
+  testWidgets('compose mode creates after sources have been imported', (
+    tester,
+  ) async {
+    const draft = ArchiveListing(
+      archivePath: '新建压缩包',
+      entries: [ArchiveEntry(path: 'report.txt', isDirectory: false)],
+    );
+    var created = false;
+    await _pumpArchiveScreen(
+      tester,
+      draft,
+      mode: ArchiveScreenMode.compose,
+      onCreate: () => created = true,
+    );
+
+    await tester.tap(find.byKey(const ValueKey('archive-create')));
+    await tester.pumpAndSettle();
+    expect(created, isTrue);
+    expect(find.text('测试'), findsNothing);
+    expect(find.text('解压'), findsNothing);
+  });
+
   testWidgets('breadcrumb shows home and navigates to any parent level', (
     tester,
   ) async {
@@ -558,6 +610,9 @@ Future<void> _pumpArchiveScreen(
   ArchiveEntriesCallback? onDeleteEntries,
   ArchiveDropCallback? onDropped,
   ArchiveDragCallback? onDragEntries,
+  ArchiveScreenMode mode = ArchiveScreenMode.browse,
+  ArchiveImportCallback? onImport,
+  VoidCallback? onCreate,
 }) async {
   final theme = dark
       ? FTheme.neutral.dark.desktop
@@ -581,6 +636,9 @@ Future<void> _pumpArchiveScreen(
             onDeleteEntries: onDeleteEntries ?? (_) async => true,
             onDropped: onDropped ?? (_, _) async {},
             onDragEntries: onDragEntries ?? (_) async {},
+            mode: mode,
+            onImport: onImport,
+            onCreate: onCreate,
           ),
         ),
       ),

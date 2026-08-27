@@ -7,41 +7,42 @@ import '../archive/archive_options.dart';
 
 enum SourcePickerChoice { files, folder }
 
-Future<SourcePickerChoice?> showSourcePicker(BuildContext context) =>
-    showFDialog<SourcePickerChoice>(
-      context: context,
-      builder: (context, _, animation) => FDialog(
-        animation: animation,
-        constraints: const BoxConstraints(minWidth: 390, maxWidth: 430),
-        builder: (context, style) => Padding(
-          padding: const EdgeInsets.all(22),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('创建压缩包', style: style.titleTextStyle),
-              const SizedBox(height: 8),
-              Text('选择要添加的内容', style: style.bodyTextStyle),
-              const SizedBox(height: 20),
-              FButton(
-                onPress: () =>
-                    Navigator.of(context).pop(SourcePickerChoice.files),
-                prefix: const Icon(FLucideIcons.files, size: 17),
-                child: const Text('选择文件'),
-              ),
-              const SizedBox(height: 8),
-              FButton(
-                variant: FButtonVariant.outline,
-                onPress: () =>
-                    Navigator.of(context).pop(SourcePickerChoice.folder),
-                prefix: const Icon(FLucideIcons.folder, size: 17),
-                child: const Text('选择文件夹'),
-              ),
-            ],
+Future<SourcePickerChoice?> showSourcePicker(
+  BuildContext context, {
+  String title = '创建压缩包',
+  String description = '选择要添加的内容',
+}) => showFDialog<SourcePickerChoice>(
+  context: context,
+  builder: (context, _, animation) => FDialog(
+    animation: animation,
+    constraints: const BoxConstraints(minWidth: 390, maxWidth: 430),
+    builder: (context, style) => Padding(
+      padding: const EdgeInsets.all(22),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(title, style: style.titleTextStyle),
+          const SizedBox(height: 8),
+          Text(description, style: style.bodyTextStyle),
+          const SizedBox(height: 20),
+          FButton(
+            onPress: () => Navigator.of(context).pop(SourcePickerChoice.files),
+            prefix: const Icon(FLucideIcons.files, size: 17),
+            child: const Text('选择文件'),
           ),
-        ),
+          const SizedBox(height: 8),
+          FButton(
+            variant: FButtonVariant.outline,
+            onPress: () => Navigator.of(context).pop(SourcePickerChoice.folder),
+            prefix: const Icon(FLucideIcons.folder, size: 17),
+            child: const Text('选择文件夹'),
+          ),
+        ],
       ),
-    );
+    ),
+  ),
+);
 
 Future<CreateArchiveOptions?> showCreateArchiveDialog(
   BuildContext context, {

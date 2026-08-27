@@ -62,15 +62,13 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
                         fontWeight: FontWeight.w600,
                       ),
                     ),
-                    if (_directory.isNotEmpty)
-                      Text(
-                        _directory,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: context.theme.typography.body.xs.copyWith(
-                          color: colors.mutedForeground,
-                        ),
-                      ),
+                    _ArchiveBreadcrumb(
+                      directory: _directory,
+                      onNavigate: (directory) {
+                        if (directory == _directory) return;
+                        setState(() => _directory = directory);
+                      },
+                    ),
                   ],
                 ),
               ),
@@ -158,6 +156,120 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
       final slash = _directory.lastIndexOf('/');
       _directory = slash < 0 ? '' : _directory.substring(0, slash);
     });
+  }
+}
+
+class _ArchiveBreadcrumb extends StatelessWidget {
+  const _ArchiveBreadcrumb({required this.directory, required this.onNavigate});
+
+  final String directory;
+  final ValueChanged<String> onNavigate;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.theme.colors;
+    final segments = directory.isEmpty
+        ? const <String>[]
+        : directory.split('/');
+    final children = <Widget>[
+      _BreadcrumbItem(
+        key: const ValueKey('archive-breadcrumb-root'),
+        semanticsLabel: '根目录',
+        onTap: () => onNavigate(''),
+        child: Icon(
+          FLucideIcons.house,
+          size: 13,
+          color: directory.isEmpty ? colors.foreground : colors.mutedForeground,
+        ),
+      ),
+    ];
+
+    for (var index = 0; index < segments.length; index++) {
+      final path = segments.take(index + 1).join('/');
+      children
+        ..add(
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 2),
+            child: Text(
+              '/',
+              style: context.theme.typography.body.xs.copyWith(
+                color: colors.mutedForeground,
+              ),
+            ),
+          ),
+        )
+        ..add(
+          _BreadcrumbItem(
+            key: ValueKey('archive-breadcrumb-$path'),
+            semanticsLabel: '打开 $path',
+            onTap: () => onNavigate(path),
+            child: Text(
+              segments[index],
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: context.theme.typography.body.xs.copyWith(
+                color: index == segments.length - 1
+                    ? colors.foreground
+                    : colors.mutedForeground,
+              ),
+            ),
+          ),
+        );
+    }
+
+    return SizedBox(
+      height: 20,
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(children: children),
+      ),
+    );
+  }
+}
+
+class _BreadcrumbItem extends StatefulWidget {
+  const _BreadcrumbItem({
+    required this.semanticsLabel,
+    required this.onTap,
+    required this.child,
+    super.key,
+  });
+
+  final String semanticsLabel;
+  final VoidCallback onTap;
+  final Widget child;
+
+  @override
+  State<_BreadcrumbItem> createState() => _BreadcrumbItemState();
+}
+
+class _BreadcrumbItemState extends State<_BreadcrumbItem> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.theme.colors;
+    return Semantics(
+      button: true,
+      label: widget.semanticsLabel,
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        onEnter: (_) => setState(() => _hovered = true),
+        onExit: (_) => setState(() => _hovered = false),
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: widget.onTap,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 2),
+            decoration: BoxDecoration(
+              color: _hovered ? colors.secondary : null,
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: widget.child,
+          ),
+        ),
+      ),
+    );
   }
 }
 

@@ -6,6 +6,10 @@ import 'package:pinyin/pinyin.dart';
 
 import '../archive/archive_entry.dart';
 
+typedef ArchiveEntriesCallback = Future<bool> Function(
+  List<ArchiveEntry> entries,
+);
+
 class ArchiveScreen extends StatefulWidget {
   const ArchiveScreen({
     required this.listing,
@@ -16,6 +20,8 @@ class ArchiveScreen extends StatefulWidget {
     required this.onPreviewEntry,
     required this.onExtractEntry,
     required this.onDeleteEntry,
+    required this.onExtractEntries,
+    required this.onDeleteEntries,
     super.key,
   });
 
@@ -27,6 +33,8 @@ class ArchiveScreen extends StatefulWidget {
   final ValueChanged<ArchiveEntry> onPreviewEntry;
   final ValueChanged<ArchiveEntry> onExtractEntry;
   final ValueChanged<ArchiveEntry> onDeleteEntry;
+  final ArchiveEntriesCallback onExtractEntries;
+  final ArchiveEntriesCallback onDeleteEntries;
 
   @override
   State<ArchiveScreen> createState() => _ArchiveScreenState();
@@ -36,6 +44,26 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
   String _directory = '';
   List<double> _columnFractions = const [5 / 12, 2 / 12, 2 / 12, 3 / 12];
   ArchiveSort? _sort;
+  bool _selectionMode = false;
+  final Map<String, ArchiveEntry> _selectedEntries = {};
+
+  @override
+  void didUpdateWidget(covariant ArchiveScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.listing.archivePath != oldWidget.listing.archivePath) {
+      _selectionMode = false;
+      _selectedEntries.clear();
+    } else {
+      final available = widget.listing.entries
+          .map((entry) => entry.path.replaceAll('\\', '/'))
+          .toSet();
+      _selectedEntries.removeWhere(
+        (path, entry) =>
+            !entry.isDirectory &&
+            !available.contains(path.replaceAll('\\', '/')),
+      );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -86,20 +114,78 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
                   ],
                 ),
               ),
-              FButton(
-                size: FButtonSizeVariant.sm,
-                variant: FButtonVariant.ghost,
-                onPress: widget.enabled ? widget.onTest : null,
-                prefix: const Icon(FLucideIcons.shieldCheck, size: 16),
-                child: const Text('测试'),
-              ),
-              const SizedBox(width: 6),
-              FButton(
-                size: FButtonSizeVariant.sm,
-                onPress: widget.enabled ? widget.onExtract : null,
-                prefix: const Icon(FLucideIcons.archiveRestore, size: 16),
-                child: const Text('解压'),
-              ),
+              if (_selectionMode) ...[
+                Text(
+                  '已选择 ${_selectedEntries.length} 项',
+                  style: context.theme.typography.body.sm.copyWith(
+                    color: colors.mutedForeground,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                FButton(
+                  size: FButtonSizeVariant.sm,
+                  variant: FButtonVariant.ghost,
+                  onPress: widget.enabled
+                      ? () => _toggleAllVisible(entries)
+                      : null,
+                  child: Text(_allVisibleSelected(entries) ? '取消全选' : '全选'),
+                ),
+                const SizedBox(width: 6),
+                FButton(
+                  key: const ValueKey('archive-batch-extract'),
+                  size: FButtonSizeVariant.sm,
+                  variant: FButtonVariant.outline,
+                  onPress: widget.enabled && _selectedEntries.isNotEmpty
+                      ? () => _runBatch(widget.onExtractEntries)
+                      : null,
+                  prefix: const Icon(FLucideIcons.archiveRestore, size: 15),
+                  child: const Text('解压所选'),
+                ),
+                const SizedBox(width: 6),
+                FButton(
+                  key: const ValueKey('archive-batch-delete'),
+                  size: FButtonSizeVariant.sm,
+                  variant: FButtonVariant.destructive,
+                  onPress: widget.enabled && _selectedEntries.isNotEmpty
+                      ? () => _runBatch(widget.onDeleteEntries)
+                      : null,
+                  prefix: const Icon(FLucideIcons.trash2, size: 15),
+                  child: const Text('删除所选'),
+                ),
+                const SizedBox(width: 6),
+                FButton(
+                  key: const ValueKey('archive-selection-done'),
+                  size: FButtonSizeVariant.sm,
+                  onPress: widget.enabled ? _leaveSelectionMode : null,
+                  child: const Text('完成'),
+                ),
+              ] else ...[
+                FButton(
+                  size: FButtonSizeVariant.sm,
+                  variant: FButtonVariant.ghost,
+                  onPress: widget.enabled ? widget.onTest : null,
+                  prefix: const Icon(FLucideIcons.shieldCheck, size: 16),
+                  child: const Text('测试'),
+                ),
+                const SizedBox(width: 6),
+                FButton(
+                  key: const ValueKey('archive-selection-toggle'),
+                  size: FButtonSizeVariant.sm,
+                  variant: FButtonVariant.ghost,
+                  onPress: widget.enabled
+                      ? () => setState(() => _selectionMode = true)
+                      : null,
+                  prefix: const Icon(FLucideIcons.listChecks, size: 16),
+                  child: const Text('多选'),
+                ),
+                const SizedBox(width: 6),
+                FButton(
+                  size: FButtonSizeVariant.sm,
+                  onPress: widget.enabled ? widget.onExtract : null,
+                  prefix: const Icon(FLucideIcons.archiveRestore, size: 16),
+                  child: const Text('解压'),
+                ),
+              ],
             ],
           ),
         ),
@@ -141,6 +227,11 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
                       size: entry.size,
                       packedSize: entry.packedSize,
                       modified: entry.modified,
+                      selectionMode: _selectionMode,
+                      selected: _selectedEntries.containsKey(entry.path),
+                      onSelectionChanged: widget.enabled
+                          ? (selected) => _setEntrySelected(entry, selected)
+                          : null,
                       onOpen: entry.isDirectory
                           ? () => setState(() {
                               _directory = _directory.isEmpty
@@ -176,6 +267,49 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
     setState(() {
       final slash = _directory.lastIndexOf('/');
       _directory = slash < 0 ? '' : _directory.substring(0, slash);
+    });
+  }
+
+  void _setEntrySelected(ArchiveEntry entry, bool selected) {
+    setState(() {
+      if (selected) {
+        _selectedEntries[entry.path] = entry;
+      } else {
+        _selectedEntries.remove(entry.path);
+      }
+    });
+  }
+
+  bool _allVisibleSelected(List<ArchiveEntry> entries) =>
+      entries.isNotEmpty &&
+      entries.every((entry) => _selectedEntries.containsKey(entry.path));
+
+  void _toggleAllVisible(List<ArchiveEntry> entries) {
+    final deselect = _allVisibleSelected(entries);
+    setState(() {
+      for (final entry in entries) {
+        if (deselect) {
+          _selectedEntries.remove(entry.path);
+        } else {
+          _selectedEntries[entry.path] = entry;
+        }
+      }
+    });
+  }
+
+  Future<void> _runBatch(ArchiveEntriesCallback callback) async {
+    final entries = List<ArchiveEntry>.of(_selectedEntries.values);
+    if (entries.isEmpty) return;
+    final processed = await callback(entries);
+    if (processed && mounted) {
+      setState(() => _selectedEntries.clear());
+    }
+  }
+
+  void _leaveSelectionMode() {
+    setState(() {
+      _selectionMode = false;
+      _selectedEntries.clear();
     });
   }
 
@@ -561,6 +695,9 @@ class _ArchiveRow extends StatefulWidget {
     this.onOpen,
     this.onExtract,
     this.onDelete,
+    this.selectionMode = false,
+    this.selected = false,
+    this.onSelectionChanged,
   });
 
   final String name;
@@ -572,6 +709,9 @@ class _ArchiveRow extends StatefulWidget {
   final VoidCallback? onOpen;
   final VoidCallback? onExtract;
   final VoidCallback? onDelete;
+  final bool selectionMode;
+  final bool selected;
+  final ValueChanged<bool>? onSelectionChanged;
 
   @override
   State<_ArchiveRow> createState() => _ArchiveRowState();
@@ -589,7 +729,10 @@ class _ArchiveRowState extends State<_ArchiveRow> {
       onExit: (_) => setState(() => _hovered = false),
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
-        onDoubleTap: widget.onOpen,
+        onTap: widget.selectionMode
+            ? () => widget.onSelectionChanged?.call(!widget.selected)
+            : null,
+        onDoubleTap: widget.selectionMode ? null : widget.onOpen,
         child: Container(
           key: ValueKey('archive-row-${widget.name}'),
           height: 42,
@@ -606,6 +749,16 @@ class _ArchiveRowState extends State<_ArchiveRow> {
                   padding: _columnPadding[0],
                   child: Row(
                     children: [
+                      if (widget.selectionMode) ...[
+                        FCheckbox(
+                          key: ValueKey('archive-select-${widget.name}'),
+                          semanticsLabel: '选择 ${widget.name}',
+                          value: widget.selected,
+                          onChange: widget.onSelectionChanged,
+                          enabled: widget.onSelectionChanged != null,
+                        ),
+                        const SizedBox(width: 10),
+                      ],
                       Icon(
                         widget.isDirectory
                             ? FLucideIcons.folder

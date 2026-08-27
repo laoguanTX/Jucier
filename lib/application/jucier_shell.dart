@@ -161,6 +161,8 @@ class _JucierShellState extends State<JucierShell> {
       onPreviewEntry: _previewEntry,
       onExtractEntry: _extractEntry,
       onDeleteEntry: _deleteEntry,
+      onExtractEntries: _extractEntries,
+      onDeleteEntries: _deleteEntries,
     );
   }
 
@@ -339,61 +341,109 @@ class _JucierShellState extends State<JucierShell> {
   }
 
   Future<void> _extractEntry(ArchiveEntry entry) async {
-    final listing = _workflow.listing;
-    if (listing == null || _workflow.busy) return;
-    final outputDirectory = await getDirectoryPath(confirmButtonText: '解压到这里');
-    if (outputDirectory == null || !mounted) return;
+    await _extractEntries([entry]);
+  }
 
-    final paths = _pathsForEntry(listing, entry);
+  Future<bool> _extractEntries(List<ArchiveEntry> requestedEntries) async {
+    final listing = _workflow.listing;
+    if (listing == null || _workflow.busy || requestedEntries.isEmpty) {
+      return false;
+    }
+    final entries = _topLevelEntries(requestedEntries);
+    final outputDirectory = await getDirectoryPath(confirmButtonText: '解压到这里');
+    if (outputDirectory == null || !mounted) return false;
+
     try {
-      await _workflow.extractEntries(
-        ExtractEntriesOptions(
-          archivePath: listing.archivePath,
-          entryPaths: paths,
-          outputDirectory: outputDirectory,
-          password: _workflow.password,
-          withoutParentDirectories:
-              widget.singleEntryExtractionMode ==
-              SingleEntryExtractionMode.selectedOnly,
-          selectedEntryPath: entry.path,
-        ),
-      );
+      if (widget.singleEntryExtractionMode ==
+          SingleEntryExtractionMode.selectedOnly) {
+        for (final entry in entries) {
+          await _workflow.extractEntries(
+            ExtractEntriesOptions(
+              archivePath: listing.archivePath,
+              entryPaths: _pathsForEntry(listing, entry),
+              outputDirectory: outputDirectory,
+              password: _workflow.password,
+              withoutParentDirectories: true,
+              selectedEntryPath: entry.path,
+              conflict: entries.length > 1
+                  ? ExtractionConflict.rename
+                  : ExtractionConflict.overwrite,
+            ),
+          );
+        }
+      } else {
+        final paths = entries
+            .expand((entry) => _pathsForEntry(listing, entry))
+            .toSet()
+            .toList();
+        await _workflow.extractEntries(
+          ExtractEntriesOptions(
+            archivePath: listing.archivePath,
+            entryPaths: paths,
+            outputDirectory: outputDirectory,
+            password: _workflow.password,
+          ),
+        );
+      }
       if (mounted) {
+        final label = entries.length == 1
+            ? entries.single.name
+            : '${entries.length} 个项目';
         await showMessageDialog(
           context,
           title: '解压完成',
-          message: '${entry.name} 已保存到 $outputDirectory',
+          message: '$label 已保存到 $outputDirectory',
         );
       }
+      return true;
     } on ArchiveCancelledException {
       // Explicit cancellations do not need an error dialog.
+      return false;
     } on ArchiveException catch (error) {
       if (mounted) {
         await showMessageDialog(context, title: '解压失败', message: error.message);
       }
+      return false;
     }
   }
 
   Future<void> _deleteEntry(ArchiveEntry entry) async {
+    await _deleteEntries([entry]);
+  }
+
+  Future<bool> _deleteEntries(List<ArchiveEntry> requestedEntries) async {
     final listing = _workflow.listing;
-    if (listing == null || _workflow.busy) return;
+    if (listing == null || _workflow.busy || requestedEntries.isEmpty) {
+      return false;
+    }
+    final entries = _topLevelEntries(requestedEntries);
+    final description = entries.length == 1
+        ? '“${entries.single.name}”'
+        : '所选 ${entries.length} 个项目';
     final confirmed = await showConfirmationDialog(
       context,
       title: '从压缩包中删除？',
-      message: '“${entry.name}”将从 ${p.basename(listing.archivePath)} 中永久删除。',
+      message: '$description 将从 ${p.basename(listing.archivePath)} 中永久删除。',
       confirmLabel: '删除',
       destructive: true,
     );
-    if (!confirmed || !mounted) return;
+    if (!confirmed || !mounted) return false;
 
     try {
-      await _workflow.deleteEntries(_pathsForEntry(listing, entry));
+      final paths = entries
+          .expand((entry) => _pathsForEntry(listing, entry))
+          .toSet()
+          .toList();
+      await _workflow.deleteEntries(paths);
+      return true;
     } on ArchiveCancelledException {
       // Explicit cancellations do not need an error dialog.
+      return false;
     } on ArchiveException catch (error) {
       if (mounted) {
         await showMessageDialog(context, title: '删除失败', message: error.message);
       }
+      return false;
     }
   }
 
@@ -456,6 +506,28 @@ class _JucierShellState extends State<JucierShell> {
         .where((candidate) => candidate == path || candidate.startsWith(prefix))
         .toList();
     return descendants.isEmpty ? [path] : descendants;
+  }
+
+  List<ArchiveEntry> _topLevelEntries(List<ArchiveEntry> entries) {
+    final normalized = entries
+        .map(
+          (entry) => MapEntry(
+            entry.path.replaceAll('\\', '/').replaceAll(RegExp(r'/+$'), ''),
+            entry,
+          ),
+        )
+        .toList();
+    return normalized
+        .where(
+          (candidate) => !normalized.any(
+            (other) =>
+                other.key != candidate.key &&
+                other.value.isDirectory &&
+                candidate.key.startsWith('${other.key}/'),
+          ),
+        )
+        .map((entry) => entry.value)
+        .toList();
   }
 }
 

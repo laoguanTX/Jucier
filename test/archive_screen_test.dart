@@ -315,6 +315,58 @@ void main() {
     await tester.pumpAndSettle();
     expect(deleted?.path, 'report.txt');
   });
+
+  testWidgets('multi-select mode exposes checkboxes and batch actions', (
+    tester,
+  ) async {
+    const listing = ArchiveListing(
+      archivePath: '/tmp/example.zip',
+      entries: [
+        ArchiveEntry(path: 'one.txt', isDirectory: false),
+        ArchiveEntry(path: 'two.txt', isDirectory: false),
+      ],
+    );
+    var extracted = <ArchiveEntry>[];
+    var deleted = <ArchiveEntry>[];
+    await _pumpArchiveScreen(
+      tester,
+      listing,
+      onExtractEntries: (entries) async {
+        extracted = entries;
+        return true;
+      },
+      onDeleteEntries: (entries) async {
+        deleted = entries;
+        return true;
+      },
+    );
+
+    expect(find.byType(FCheckbox), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('archive-selection-toggle')));
+    await tester.pumpAndSettle();
+    expect(find.byType(FCheckbox), findsNWidgets(2));
+    expect(find.text('已选择 0 项'), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('archive-select-one.txt')));
+    await tester.pump();
+    expect(find.text('已选择 1 项'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('archive-batch-extract')));
+    await tester.pumpAndSettle();
+    expect(extracted.map((entry) => entry.path), ['one.txt']);
+    expect(find.text('已选择 0 项'), findsOneWidget);
+
+    await tester.tap(find.text('全选'));
+    await tester.pump();
+    expect(find.text('已选择 2 项'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('archive-batch-delete')));
+    await tester.pumpAndSettle();
+    expect(deleted.map((entry) => entry.path), ['one.txt', 'two.txt']);
+
+    await tester.tap(find.byKey(const ValueKey('archive-selection-done')));
+    await tester.pumpAndSettle();
+    expect(find.byType(FCheckbox), findsNothing);
+    expect(find.text('多选'), findsOneWidget);
+  });
 }
 
 void _expectVerticalOrder(WidgetTester tester, List<String> labels) {
@@ -338,6 +390,8 @@ Future<void> _pumpArchiveScreen(
   ValueChanged<ArchiveEntry>? onPreviewEntry,
   ValueChanged<ArchiveEntry>? onExtractEntry,
   ValueChanged<ArchiveEntry>? onDeleteEntry,
+  ArchiveEntriesCallback? onExtractEntries,
+  ArchiveEntriesCallback? onDeleteEntries,
 }) async {
   final theme = dark
       ? FTheme.neutral.dark.desktop
@@ -357,6 +411,8 @@ Future<void> _pumpArchiveScreen(
             onPreviewEntry: onPreviewEntry ?? (_) {},
             onExtractEntry: onExtractEntry ?? (_) {},
             onDeleteEntry: onDeleteEntry ?? (_) {},
+            onExtractEntries: onExtractEntries ?? (_) async => true,
+            onDeleteEntries: onDeleteEntries ?? (_) async => true,
           ),
         ),
       ),

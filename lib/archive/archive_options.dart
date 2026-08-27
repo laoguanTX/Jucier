@@ -1,20 +1,48 @@
 enum ArchiveFormat {
-  sevenZip('7z', '7z'),
-  zip('ZIP', 'zip'),
-  tar('TAR', 'tar'),
-  gzip('GZIP', 'gzip');
+  // Keep this list in user-facing popularity order. The create-format menu
+  // intentionally follows enum order so the most useful choices stay close
+  // to the pointer and keyboard focus.
+  zip(
+    label: 'ZIP',
+    sevenZipType: 'zip',
+    extension: 'zip',
+    supportsPassword: true,
+  ),
+  sevenZip(
+    label: '7Z',
+    sevenZipType: '7z',
+    extension: '7z',
+    supportsPassword: true,
+  ),
+  tar(label: 'TAR', sevenZipType: 'tar', extension: 'tar'),
+  gzip(
+    label: 'GZIP',
+    sevenZipType: 'gzip',
+    extension: 'gz',
+    singleSourceOnly: true,
+  ),
+  xz(label: 'XZ', sevenZipType: 'xz', extension: 'xz', singleSourceOnly: true),
+  bzip2(
+    label: 'BZIP2',
+    sevenZipType: 'bzip2',
+    extension: 'bz2',
+    singleSourceOnly: true,
+  ),
+  wim(label: 'WIM', sevenZipType: 'wim', extension: 'wim');
 
-  const ArchiveFormat(this.label, this.sevenZipType);
+  const ArchiveFormat({
+    required this.label,
+    required this.sevenZipType,
+    required this.extension,
+    this.supportsPassword = false,
+    this.singleSourceOnly = false,
+  });
 
   final String label;
   final String sevenZipType;
-
-  String get extension => switch (this) {
-    ArchiveFormat.sevenZip => '7z',
-    ArchiveFormat.zip => 'zip',
-    ArchiveFormat.tar => 'tar',
-    ArchiveFormat.gzip => 'gz',
-  };
+  final String extension;
+  final bool supportsPassword;
+  final bool singleSourceOnly;
 }
 
 enum ExtractionConflict {

@@ -68,13 +68,11 @@ class SevenZipEngine implements ArchiveEngine {
     if (options.sources.isEmpty) {
       throw const ArchiveException('没有选择要压缩的文件');
     }
-    if (options.format == ArchiveFormat.gzip && options.sources.length != 1) {
-      throw const ArchiveException('GZIP 一次只能压缩一个文件');
+    if (options.format.singleSourceOnly && options.sources.length != 1) {
+      throw ArchiveException('${options.format.label} 一次只能压缩一个文件');
     }
     if (options.password case final password?
-        when password.isNotEmpty &&
-            options.format != ArchiveFormat.sevenZip &&
-            options.format != ArchiveFormat.zip) {
+        when password.isNotEmpty && !options.format.supportsPassword) {
       throw ArchiveException('${options.format.label} 格式不支持密码加密');
     }
 

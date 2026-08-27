@@ -205,6 +205,30 @@ void main() {
     skip: skip ? 'Build assets/sevenzip/7zz first.' : false,
   );
 
+  test('creates every format exposed by the create menu', () async {
+    final temporary = await Directory.systemTemp.createTemp(
+      'jucier-create-formats-e2e-',
+    );
+    addTearDown(() => temporary.delete(recursive: true));
+
+    final source = File(p.join(temporary.path, 'source.txt'));
+    await source.writeAsString('format coverage');
+    final engine = SevenZipEngine(executablePath: executable);
+
+    for (final format in ArchiveFormat.values) {
+      final archive = p.join(temporary.path, 'sample.${format.extension}');
+      await engine.create(
+        CreateArchiveOptions(
+          archivePath: archive,
+          sources: [source.path],
+          format: format,
+        ),
+      );
+      expect(File(archive).lengthSync(), greaterThan(0), reason: format.label);
+      await engine.test(archive);
+    }
+  }, skip: skip ? 'Build assets/sevenzip/7zz first.' : false);
+
   test('adds dropped files and folders to an archive subdirectory', () async {
     final temporary = await Directory.systemTemp.createTemp(
       'jucier-add-entries-e2e-',

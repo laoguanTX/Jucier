@@ -21,6 +21,8 @@ Future<ArchiveListing> buildArchiveDraftListing(List<String> sources) async {
           path: p.basename(source),
           isDirectory: true,
           modified: rootStat.modified,
+          sourcePath: source,
+          attributes: rootStat.modeString(),
         ),
       );
       await for (final entity in Directory(
@@ -38,6 +40,8 @@ Future<ArchiveListing> buildArchiveDraftListing(List<String> sources) async {
             isDirectory: isDirectory,
             size: isDirectory ? null : stat.size,
             modified: stat.modified,
+            sourcePath: entity.path,
+            attributes: stat.modeString(),
           ),
         );
       }
@@ -50,6 +54,8 @@ Future<ArchiveListing> buildArchiveDraftListing(List<String> sources) async {
           isDirectory: false,
           size: stat.size,
           modified: stat.modified,
+          sourcePath: source,
+          attributes: stat.modeString(),
         ),
       );
     }

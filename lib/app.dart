@@ -2,9 +2,11 @@ import 'package:forui/forui.dart';
 import 'package:material_ui/material_ui.dart';
 
 import 'application/jucier_shell.dart';
+import 'archive/archive_column.dart';
 import 'archive/archive_engine.dart';
 import 'archive/seven_zip_engine.dart';
 import 'platform/file_access_service.dart';
+import 'platform/archive_column_preference_store.dart';
 import 'platform/single_entry_extraction_preference_store.dart';
 import 'platform/theme_preference_store.dart';
 
@@ -18,6 +20,7 @@ class JucierApp extends StatefulWidget {
     this.fileAccessService,
     this.themePreferenceStore,
     this.singleEntryExtractionPreferenceStore,
+    this.archiveColumnPreferenceStore,
   });
 
   final ArchiveEngine? engine;
@@ -25,6 +28,7 @@ class JucierApp extends StatefulWidget {
   final ThemePreferenceStore? themePreferenceStore;
   final SingleEntryExtractionPreferenceStore?
   singleEntryExtractionPreferenceStore;
+  final ArchiveColumnPreferenceStore? archiveColumnPreferenceStore;
 
   @override
   State<JucierApp> createState() => _JucierAppState();
@@ -36,11 +40,15 @@ class _JucierAppState extends State<JucierApp> {
   late final ThemePreferenceStore _themePreferenceStore;
   late final SingleEntryExtractionPreferenceStore
   _singleEntryExtractionPreferenceStore;
+  late final ArchiveColumnPreferenceStore _archiveColumnPreferenceStore;
   ThemeMode _themeMode = ThemeMode.system;
   SingleEntryExtractionMode _singleEntryExtractionMode =
       SingleEntryExtractionMode.preserveArchiveStructure;
+  ArchiveColumnPreferences _archiveColumnPreferences =
+      const ArchiveColumnPreferences();
   bool _themeChangedByUser = false;
   bool _singleEntryExtractionModeChangedByUser = false;
+  bool _archiveColumnPreferencesChangedByUser = false;
 
   @override
   void initState() {
@@ -52,8 +60,12 @@ class _JucierAppState extends State<JucierApp> {
     _singleEntryExtractionPreferenceStore =
         widget.singleEntryExtractionPreferenceStore ??
         MacOSSingleEntryExtractionPreferenceStore();
+    _archiveColumnPreferenceStore =
+        widget.archiveColumnPreferenceStore ??
+        MacOSArchiveColumnPreferenceStore();
     _loadThemeMode();
     _loadSingleEntryExtractionMode();
+    _loadArchiveColumnPreferences();
   }
 
   Future<void> _loadThemeMode() async {
@@ -82,6 +94,19 @@ class _JucierAppState extends State<JucierApp> {
     _singleEntryExtractionModeChangedByUser = true;
     setState(() => _singleEntryExtractionMode = mode);
     _singleEntryExtractionPreferenceStore.save(mode);
+  }
+
+  Future<void> _loadArchiveColumnPreferences() async {
+    final preferences = await _archiveColumnPreferenceStore.load();
+    if (mounted && !_archiveColumnPreferencesChangedByUser) {
+      setState(() => _archiveColumnPreferences = preferences);
+    }
+  }
+
+  void _setArchiveColumnPreferences(ArchiveColumnPreferences preferences) {
+    _archiveColumnPreferencesChangedByUser = true;
+    setState(() => _archiveColumnPreferences = preferences);
+    _archiveColumnPreferenceStore.save(preferences);
   }
 
   @override
@@ -121,6 +146,8 @@ class _JucierAppState extends State<JucierApp> {
         onThemeModeChanged: _setThemeMode,
         singleEntryExtractionMode: _singleEntryExtractionMode,
         onSingleEntryExtractionModeChanged: _setSingleEntryExtractionMode,
+        archiveColumnPreferences: _archiveColumnPreferences,
+        onArchiveColumnPreferencesChanged: _setArchiveColumnPreferences,
       ),
     );
   }

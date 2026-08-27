@@ -11,6 +11,7 @@ import 'package:path/path.dart' as p;
 
 import '../archive/archive_engine.dart';
 import '../archive/archive_entry.dart';
+import '../archive/archive_column.dart';
 import '../archive/archive_formats.dart';
 import '../archive/archive_options.dart';
 import '../dialogs/confirmation_dialog.dart';
@@ -46,6 +47,8 @@ class JucierShell extends StatefulWidget {
     this.singleEntryExtractionMode =
         SingleEntryExtractionMode.preserveArchiveStructure,
     this.onSingleEntryExtractionModeChanged,
+    this.archiveColumnPreferences = const ArchiveColumnPreferences(),
+    this.onArchiveColumnPreferencesChanged,
     super.key,
   });
 
@@ -57,6 +60,9 @@ class JucierShell extends StatefulWidget {
   final SingleEntryExtractionMode singleEntryExtractionMode;
   final ValueChanged<SingleEntryExtractionMode>?
   onSingleEntryExtractionModeChanged;
+  final ArchiveColumnPreferences archiveColumnPreferences;
+  final ValueChanged<ArchiveColumnPreferences>?
+  onArchiveColumnPreferencesChanged;
 
   @override
   State<JucierShell> createState() => _JucierShellState();
@@ -156,6 +162,9 @@ class _JucierShellState extends State<JucierShell> {
         singleEntryExtractionMode: widget.singleEntryExtractionMode,
         onSingleEntryExtractionModeChanged:
             widget.onSingleEntryExtractionModeChanged,
+        archiveColumnPreferences: widget.archiveColumnPreferences,
+        onArchiveColumnPreferencesChanged:
+            widget.onArchiveColumnPreferencesChanged,
         onBack: () => setState(() => _settingsOpen = false),
       );
     }
@@ -165,6 +174,7 @@ class _JucierShellState extends State<JucierShell> {
         listing: _draftListing,
         enabled: !_workflow.busy && !_draftLoading,
         mode: ArchiveScreenMode.compose,
+        columns: widget.archiveColumnPreferences.compressionColumns,
         onClose: _closeArchiveDraft,
         onExtract: () {},
         onTest: () {},
@@ -193,6 +203,7 @@ class _JucierShellState extends State<JucierShell> {
       key: const ValueKey('archive-page'),
       listing: _workflow.listing!,
       enabled: !_workflow.busy,
+      columns: widget.archiveColumnPreferences.extractionColumns,
       onClose: _workflow.closeArchive,
       onExtract: _extractCurrentArchive,
       onTest: _testCurrentArchive,

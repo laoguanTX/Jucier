@@ -9,7 +9,9 @@ class ArchiveEntry {
     this.modified,
     this.crc,
     this.method,
-    this.encrypted = false,
+    this.encrypted,
+    this.sourcePath,
+    this.attributes,
   });
 
   final String path;
@@ -19,7 +21,9 @@ class ArchiveEntry {
   final DateTime? modified;
   final String? crc;
   final String? method;
-  final bool encrypted;
+  final bool? encrypted;
+  final String? sourcePath;
+  final String? attributes;
 
   String get name => p.basename(path);
 }

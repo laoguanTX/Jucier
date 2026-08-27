@@ -115,6 +115,8 @@ class MainFlutterWindow: NSWindow {
   private let permissionRequestedKey = "fileAccessPermissionRequested"
   private let themeModeKey = "themeMode"
   private let singleEntryExtractionModeKey = "singleEntryExtractionMode"
+  private let compressionArchiveColumnsKey = "compressionArchiveColumns"
+  private let extractionArchiveColumnsKey = "extractionArchiveColumns"
   private var scopedURL: URL?
   private var archiveDragSource: ArchiveFilePromiseDragSource?
   private var archiveDragResult: FlutterResult?
@@ -246,6 +248,10 @@ class MainFlutterWindow: NSWindow {
         result(self.storedSingleEntryExtractionMode())
       case "setSingleEntryExtractionMode":
         self.setSingleEntryExtractionMode(call.arguments, result: result)
+      case "archiveColumnPreferences":
+        result(self.storedArchiveColumnPreferences())
+      case "setArchiveColumnPreferences":
+        self.setArchiveColumnPreferences(call.arguments, result: result)
       default:
         result(FlutterMethodNotImplemented)
       }
@@ -292,6 +298,53 @@ class MainFlutterWindow: NSWindow {
 
     UserDefaults.standard.set(mode, forKey: singleEntryExtractionModeKey)
     result(nil)
+  }
+
+  private func storedArchiveColumnPreferences() -> [String: [String]] {
+    return [
+      "compression": normalizedArchiveColumns(
+        UserDefaults.standard.stringArray(forKey: compressionArchiveColumnsKey)
+          ?? ["name", "size", "modified"]),
+      "extraction": normalizedArchiveColumns(
+        UserDefaults.standard.stringArray(forKey: extractionArchiveColumnsKey)
+          ?? ["name", "size", "packedSize", "modified"]),
+    ]
+  }
+
+  private func setArchiveColumnPreferences(_ value: Any?, result: FlutterResult) {
+    guard let preferences = value as? [String: Any],
+      let compression = preferences["compression"] as? [String],
+      let extraction = preferences["extraction"] as? [String] else {
+      result(FlutterError(
+        code: "invalid_archive_column_preferences",
+        message: "文件树菜单栏设置无效",
+        details: value))
+      return
+    }
+
+    UserDefaults.standard.set(
+      normalizedArchiveColumns(compression),
+      forKey: compressionArchiveColumnsKey)
+    UserDefaults.standard.set(
+      normalizedArchiveColumns(extraction),
+      forKey: extractionArchiveColumnsKey)
+    result(nil)
+  }
+
+  private func normalizedArchiveColumns(_ columns: [String]) -> [String] {
+    let allowed = Set([
+      "name", "type", "path", "size", "totalSize", "itemCount",
+      "packedSize", "compressionRatio", "modified", "method", "encrypted",
+      "crc", "sourcePath", "attributes",
+    ])
+    var normalized: [String] = []
+    for column in columns where allowed.contains(column) && !normalized.contains(column) {
+      normalized.append(column)
+    }
+    if !normalized.contains("name") {
+      normalized.insert("name", at: 0)
+    }
+    return normalized
   }
 
   private func setThemeMode(_ value: Any?, result: FlutterResult) {

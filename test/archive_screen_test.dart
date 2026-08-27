@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:desktop_drop/desktop_drop.dart';
 import 'package:flutter/gestures.dart';
 import 'package:forui/forui.dart';
+import 'package:jucier/archive/archive_column.dart';
 import 'package:jucier/archive/archive_entry.dart';
 import 'package:jucier/screens/archive_screen.dart';
 import 'package:material_ui/material_ui.dart';
@@ -107,6 +108,21 @@ void main() {
     expect(formatBytes(512), '512 B');
     expect(formatBytes(1024), '1.00 KB');
     expect(formatBytes(12 * 1024), '12.0 KB');
+  });
+
+  test('formats extended metadata and totals directory contents', () {
+    const entries = [
+      ArchiveEntry(path: 'Docs/a.txt', isDirectory: false, size: 10),
+      ArchiveEntry(path: 'Docs/Sub/b.txt', isDirectory: false, size: 20),
+      ArchiveEntry(path: 'other.txt', isDirectory: false, size: 40),
+    ];
+
+    final stats = archiveDirectoryStats(entries, 'Docs');
+    expect(stats.itemCount, 2);
+    expect(stats.totalSize, 30);
+    expect(archiveEntryType('report.pdf', false), 'PDF 文件');
+    expect(formatCompressionRatio(100, 40), '60.0%');
+    expect(formatCompressionRatio(0, 0), '—');
   });
 
   testWidgets('compose mode starts with an importable file tree', (
@@ -272,6 +288,91 @@ void main() {
     final border = decoration.border! as Border;
     final colors = FTheme.neutral.dark.desktop.colors;
     expect(border.top.color, colors.foreground.withValues(alpha: 0.28));
+  });
+
+  testWidgets('uses the selected columns in the configured order', (
+    tester,
+  ) async {
+    final listing = ArchiveListing(
+      archivePath: '/tmp/example.zip',
+      entries: [
+        ArchiveEntry(
+          path: 'report.txt',
+          isDirectory: false,
+          size: 42,
+          packedSize: 21,
+          modified: DateTime(2026, 8, 27, 12, 30),
+        ),
+      ],
+    );
+    await _pumpArchiveScreen(
+      tester,
+      listing,
+      columns: const [
+        ArchiveColumn.modified,
+        ArchiveColumn.name,
+        ArchiveColumn.size,
+      ],
+    );
+
+    expect(find.text('压缩后'), findsNothing);
+    expect(find.text('21 B'), findsNothing);
+    final headerPositions = [
+      '修改时间',
+      '名称',
+      '大小',
+    ].map((label) => tester.getTopLeft(find.text(label)).dx).toList();
+    expect(headerPositions, orderedEquals(headerPositions.toList()..sort()));
+    expect(
+      tester.getTopLeft(find.text('2026-08-27 12:30')).dx,
+      moreOrLessEquals(tester.getTopLeft(find.text('修改时间')).dx),
+    );
+    expect(
+      tester.getTopLeft(find.text('42 B')).dx,
+      moreOrLessEquals(tester.getTopLeft(find.text('大小')).dx),
+    );
+  });
+
+  testWidgets('renders optional archive metadata only when selected', (
+    tester,
+  ) async {
+    const listing = ArchiveListing(
+      archivePath: '/tmp/example.7z',
+      entries: [
+        ArchiveEntry(
+          path: 'report.pdf',
+          isDirectory: false,
+          size: 100,
+          packedSize: 40,
+          method: 'LZMA2',
+          encrypted: true,
+          crc: '1234ABCD',
+          attributes: 'A_ -rw-r--r--',
+        ),
+      ],
+    );
+    await _pumpArchiveScreen(
+      tester,
+      listing,
+      columns: const [
+        ArchiveColumn.name,
+        ArchiveColumn.type,
+        ArchiveColumn.compressionRatio,
+        ArchiveColumn.method,
+        ArchiveColumn.encrypted,
+        ArchiveColumn.crc,
+        ArchiveColumn.attributes,
+      ],
+    );
+
+    expect(find.text('PDF 文件'), findsOneWidget);
+    expect(find.text('60.0%'), findsOneWidget);
+    expect(find.text('LZMA2'), findsOneWidget);
+    expect(find.text('已加密'), findsOneWidget);
+    expect(find.text('1234ABCD'), findsOneWidget);
+    expect(find.text('A_ -rw-r--r--'), findsOneWidget);
+    expect(find.text('大小'), findsNothing);
+    expect(find.text('100 B'), findsNothing);
   });
 
   testWidgets('clicking a header cycles ascending, descending, and default', (
@@ -611,6 +712,7 @@ Future<void> _pumpArchiveScreen(
   ArchiveDropCallback? onDropped,
   ArchiveDragCallback? onDragEntries,
   ArchiveScreenMode mode = ArchiveScreenMode.browse,
+  List<ArchiveColumn> columns = defaultExtractionArchiveColumns,
   ArchiveImportCallback? onImport,
   VoidCallback? onCreate,
 }) async {
@@ -637,6 +739,7 @@ Future<void> _pumpArchiveScreen(
             onDropped: onDropped ?? (_, _) async {},
             onDragEntries: onDragEntries ?? (_) async {},
             mode: mode,
+            columns: columns,
             onImport: onImport,
             onCreate: onCreate,
           ),

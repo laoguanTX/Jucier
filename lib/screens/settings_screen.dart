@@ -2,6 +2,8 @@ import 'package:flutter/widgets.dart';
 import 'package:forui/forui.dart';
 import 'package:material_ui/material_ui.dart' show ThemeMode;
 
+import '../archive/archive_column.dart';
+import '../dialogs/archive_columns_dialog.dart';
 import '../platform/file_access_service.dart';
 import '../platform/single_entry_extraction_preference_store.dart';
 
@@ -14,6 +16,8 @@ class SettingsScreen extends StatefulWidget {
     this.singleEntryExtractionMode =
         SingleEntryExtractionMode.preserveArchiveStructure,
     this.onSingleEntryExtractionModeChanged,
+    this.archiveColumnPreferences = const ArchiveColumnPreferences(),
+    this.onArchiveColumnPreferencesChanged,
     super.key,
   });
 
@@ -23,6 +27,9 @@ class SettingsScreen extends StatefulWidget {
   final SingleEntryExtractionMode singleEntryExtractionMode;
   final ValueChanged<SingleEntryExtractionMode>?
   onSingleEntryExtractionModeChanged;
+  final ArchiveColumnPreferences archiveColumnPreferences;
+  final ValueChanged<ArchiveColumnPreferences>?
+  onArchiveColumnPreferencesChanged;
   final VoidCallback onBack;
 
   @override
@@ -129,6 +136,45 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                   const SizedBox(height: 14),
                   _SettingsCard(
+                    key: const ValueKey('settings-archive-columns-card'),
+                    icon: FLucideIcons.listTree,
+                    title: '文件树菜单栏',
+                    description: '分别选择压缩和解压文件树显示的信息与顺序。',
+                    trailing: SizedBox(
+                      width: 210,
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: FButton(
+                              key: const ValueKey(
+                                'configure-compression-columns',
+                              ),
+                              size: FButtonSizeVariant.sm,
+                              variant: FButtonVariant.outline,
+                              onPress: () =>
+                                  _configureColumns(compression: true),
+                              child: const Text('压缩…'),
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: FButton(
+                              key: const ValueKey(
+                                'configure-extraction-columns',
+                              ),
+                              size: FButtonSizeVariant.sm,
+                              variant: FButtonVariant.outline,
+                              onPress: () =>
+                                  _configureColumns(compression: false),
+                              child: const Text('解压…'),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  _SettingsCard(
                     key: const ValueKey('settings-single-entry-card'),
                     icon: FLucideIcons.fileArchive,
                     title: '单文件解压/预览模式',
@@ -194,6 +240,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
     );
   }
+
+  Future<void> _configureColumns({required bool compression}) async {
+    final preferences = widget.archiveColumnPreferences;
+    final columns = compression
+        ? preferences.compressionColumns
+        : preferences.extractionColumns;
+    final updated = await showArchiveColumnsDialog(
+      context,
+      title: compression ? '压缩文件树' : '解压文件树',
+      columns: columns,
+      availableColumns: compression
+          ? compressionAvailableArchiveColumns
+          : extractionAvailableArchiveColumns,
+    );
+    if (updated == null || !mounted) return;
+    widget.onArchiveColumnPreferencesChanged?.call(
+      compression
+          ? preferences.copyWith(compressionColumns: updated)
+          : preferences.copyWith(extractionColumns: updated),
+    );
+  }
 }
 
 class _SettingsCard extends StatelessWidget {
@@ -216,7 +283,7 @@ class _SettingsCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.theme.colors;
     return Container(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
       decoration: BoxDecoration(
         color: colors.background,
         border: Border.all(color: colors.border),

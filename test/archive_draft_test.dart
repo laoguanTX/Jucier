@@ -29,6 +29,9 @@ void main() {
         'Docs/readme.txt',
       ]);
       expect(listing.physicalSize, 11);
+      expect(listing.entries.first.sourcePath, looseFile.path);
+      expect(listing.entries.first.attributes, isNotEmpty);
+      expect(listing.entries.last.sourcePath, nestedFile.path);
     },
   );
 }

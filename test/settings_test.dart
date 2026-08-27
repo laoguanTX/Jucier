@@ -2,7 +2,9 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:forui/forui.dart';
 import 'package:jucier/app.dart';
+import 'package:jucier/archive/archive_column.dart';
 import 'package:jucier/archive/archive_engine.dart';
+import 'package:jucier/platform/archive_column_preference_store.dart';
 import 'package:jucier/platform/file_access_service.dart';
 import 'package:jucier/platform/single_entry_extraction_preference_store.dart';
 import 'package:jucier/platform/theme_preference_store.dart';
@@ -200,6 +202,101 @@ void main() {
     ]);
     expect(find.text('单独解压时保留压缩包中的完整父目录。'), findsOneWidget);
   });
+
+  testWidgets('configures and persists compression file-tree columns', (
+    tester,
+  ) async {
+    final columnPreferences = _FakeArchiveColumnPreferenceStore();
+    final permissions = _FakeFileAccessService(
+      initialStatus: const FileAccessStatus(requested: true, granted: true),
+    );
+
+    await tester.pumpWidget(
+      JucierApp(
+        engine: _UnusedArchiveEngine(),
+        fileAccessService: permissions,
+        themePreferenceStore: _FakeThemePreferenceStore(),
+        archiveColumnPreferenceStore: columnPreferences,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('设置'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('文件树菜单栏'), findsOneWidget);
+    await tester.tap(
+      find.byKey(const ValueKey('configure-compression-columns')),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('压缩文件树菜单栏'), findsOneWidget);
+    expect(
+      tester
+          .widget<FCheckbox>(
+            find.byKey(const ValueKey('archive-column-visible-type')),
+          )
+          .value,
+      isFalse,
+    );
+    expect(
+      tester
+          .widget<FCheckbox>(
+            find.byKey(const ValueKey('archive-column-visible-size')),
+          )
+          .value,
+      isTrue,
+    );
+    expect(
+      find.byKey(const ValueKey('archive-column-visible-packedSize')),
+      findsNothing,
+    );
+    await tester.tap(find.byKey(const ValueKey('archive-column-visible-type')));
+    await tester.tap(find.byKey(const ValueKey('archive-column-up-type')));
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('archive-column-up-type')));
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('save-压缩文件树-columns')));
+    await tester.pumpAndSettle();
+
+    expect(columnPreferences.saved, hasLength(1));
+    expect(columnPreferences.saved.single.compressionColumns, [
+      ArchiveColumn.name,
+      ArchiveColumn.type,
+      ArchiveColumn.size,
+      ArchiveColumn.modified,
+    ]);
+    expect(
+      columnPreferences.saved.single.extractionColumns,
+      defaultExtractionArchiveColumns,
+    );
+
+    await tester.tap(
+      find.byKey(const ValueKey('configure-extraction-columns')),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<FCheckbox>(
+            find.byKey(const ValueKey('archive-column-visible-packedSize')),
+          )
+          .value,
+      isTrue,
+    );
+    expect(
+      tester
+          .widget<FCheckbox>(
+            find.byKey(
+              const ValueKey('archive-column-visible-compressionRatio'),
+            ),
+          )
+          .value,
+      isFalse,
+    );
+    expect(
+      find.byKey(const ValueKey('archive-column-visible-sourcePath')),
+      findsNothing,
+    );
+  });
 }
 
 class _FakeFileAccessService implements FileAccessService {
@@ -268,5 +365,20 @@ class _FakeSingleEntryExtractionPreferenceStore
   Future<void> save(SingleEntryExtractionMode mode) async {
     this.mode = mode;
     savedModes.add(mode);
+  }
+}
+
+class _FakeArchiveColumnPreferenceStore
+    implements ArchiveColumnPreferenceStore {
+  ArchiveColumnPreferences preferences = const ArchiveColumnPreferences();
+  final List<ArchiveColumnPreferences> saved = [];
+
+  @override
+  Future<ArchiveColumnPreferences> load() async => preferences;
+
+  @override
+  Future<void> save(ArchiveColumnPreferences preferences) async {
+    this.preferences = preferences;
+    saved.add(preferences);
   }
 }

@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:desktop_drop/desktop_drop.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter/semantics.dart';
 import 'package:forui/forui.dart';
@@ -8,6 +10,7 @@ import 'package:path/path.dart' as p;
 import 'package:pinyin/pinyin.dart';
 
 import '../archive/archive_entry.dart';
+import '../archive/archive_column.dart';
 
 typedef ArchiveEntriesCallback = Future<bool> Function(
   List<ArchiveEntry> entries,
@@ -36,6 +39,7 @@ class ArchiveScreen extends StatefulWidget {
     required this.onDropped,
     required this.onDragEntries,
     this.mode = ArchiveScreenMode.browse,
+    this.columns = defaultExtractionArchiveColumns,
     this.onImport,
     this.onCreate,
     super.key,
@@ -54,6 +58,7 @@ class ArchiveScreen extends StatefulWidget {
   final ArchiveDropCallback onDropped;
   final ArchiveDragCallback onDragEntries;
   final ArchiveScreenMode mode;
+  final List<ArchiveColumn> columns;
   final ArchiveImportCallback? onImport;
   final VoidCallback? onCreate;
 
@@ -63,16 +68,29 @@ class ArchiveScreen extends StatefulWidget {
 
 class _ArchiveScreenState extends State<ArchiveScreen> {
   String _directory = '';
-  List<double> _columnFractions = const [5 / 12, 2 / 12, 2 / 12, 3 / 12];
+  late List<double> _columnFractions;
   ArchiveSort? _sort;
   bool _selectionMode = false;
   bool _draggingIntoArchive = false;
   bool _draggingEntriesOut = false;
   final Map<String, ArchiveEntry> _selectedEntries = {};
 
+  List<ArchiveColumn> get _columns =>
+      ArchiveColumnPreferences.normalize(widget.columns);
+
+  @override
+  void initState() {
+    super.initState();
+    _columnFractions = _initialColumnFractions(_columns);
+  }
+
   @override
   void didUpdateWidget(covariant ArchiveScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (!listEquals(widget.columns, oldWidget.columns)) {
+      _columnFractions = _initialColumnFractions(_columns);
+      if (_sort != null && !_columns.contains(_sort!.column)) _sort = null;
+    }
     if (widget.listing.archivePath != oldWidget.listing.archivePath) {
       _selectionMode = false;
       _selectedEntries.clear();
@@ -254,6 +272,7 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
         ),
         _TableHeader(
           colors: colors,
+          columns: _columns,
           columnFractions: _columnFractions,
           sort: _sort,
           onSort: _cycleSort,
@@ -277,19 +296,35 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
                       return _ArchiveRow(
                         name: '..',
                         isDirectory: true,
+                        columns: _columns,
                         columnFractions: _columnFractions,
                         onOpen: _goUp,
                       );
                     }
                     final offset = _directory.isEmpty ? index : index - 1;
                     final entry = entries[offset];
+                    final directoryStats = entry.isDirectory
+                        ? archiveDirectoryStats(
+                            widget.listing.entries,
+                            entry.path,
+                          )
+                        : null;
                     return _ArchiveRow(
                       name: entry.name,
                       isDirectory: entry.isDirectory,
+                      columns: _columns,
                       columnFractions: _columnFractions,
                       size: entry.size,
                       packedSize: entry.packedSize,
                       modified: entry.modified,
+                      path: entry.path,
+                      totalSize: directoryStats?.totalSize,
+                      itemCount: directoryStats?.itemCount,
+                      method: entry.method,
+                      encrypted: entry.encrypted,
+                      crc: entry.crc,
+                      sourcePath: entry.sourcePath,
+                      attributes: entry.attributes,
                       selectionMode: !composing && _selectionMode,
                       selected: _selectedEntries.containsKey(entry.path),
                       onSelectionChanged: widget.enabled && !composing
@@ -462,10 +497,15 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
   void _resizeColumns(int index, double delta, double availableWidth) {
     if (availableWidth <= 0) return;
 
-    const minimumFractions = [0.20, 0.10, 0.10, 0.16];
     final pairTotal = _columnFractions[index] + _columnFractions[index + 1];
+    final leftPreferred = _columns[index] == ArchiveColumn.name ? 0.20 : 0.08;
+    final rightPreferred = _columns[index + 1] == ArchiveColumn.name
+        ? 0.20
+        : 0.08;
+    final leftMinimum = math.min(leftPreferred, pairTotal * 0.45);
+    final rightMinimum = math.min(rightPreferred, pairTotal * 0.45);
     final nextLeft = (_columnFractions[index] + delta / availableWidth)
-        .clamp(minimumFractions[index], pairTotal - minimumFractions[index + 1])
+        .clamp(leftMinimum, pairTotal - rightMinimum)
         .toDouble();
     if (nextLeft == _columnFractions[index]) return;
 
@@ -613,6 +653,7 @@ class _BreadcrumbItemState extends State<_BreadcrumbItem> {
 class _TableHeader extends StatelessWidget {
   const _TableHeader({
     required this.colors,
+    required this.columns,
     required this.columnFractions,
     required this.sort,
     required this.onSort,
@@ -620,6 +661,7 @@ class _TableHeader extends StatelessWidget {
   });
 
   final FColors colors;
+  final List<ArchiveColumn> columns;
   final List<double> columnFractions;
   final ArchiveSort? sort;
   final ValueChanged<ArchiveSortColumn> onSort;
@@ -649,24 +691,22 @@ class _TableHeader extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 12),
             child: LayoutBuilder(
               builder: (context, constraints) {
-                const labels = ['名称', '大小', '压缩后', '修改时间'];
-                const columns = ArchiveSortColumn.values;
                 return Stack(
                   clipBehavior: Clip.none,
                   fit: StackFit.expand,
                   children: [
                     Row(
                       children: [
-                        for (var index = 0; index < labels.length; index++)
+                        for (var index = 0; index < columns.length; index++)
                           Expanded(
                             flex: _columnFlex(columnFractions[index]),
                             child: Padding(
-                              padding: _columnPadding[index],
+                              padding: _columnPaddingFor(index, columns.length),
                               child: _SortableHeaderLabel(
                                 key: ValueKey(
                                   'archive-sort-header-${columns[index].name}',
                                 ),
-                                label: labels[index],
+                                label: columns[index].label,
                                 column: columns[index],
                                 direction: sort?.column == columns[index]
                                     ? sort?.direction
@@ -679,7 +719,7 @@ class _TableHeader extends StatelessWidget {
                           ),
                       ],
                     ),
-                    for (var index = 0; index < labels.length - 1; index++)
+                    for (var index = 0; index < columns.length - 1; index++)
                       Positioned(
                         left:
                             constraints.maxWidth *
@@ -693,7 +733,7 @@ class _TableHeader extends StatelessWidget {
                         child: _ColumnResizeHandle(
                           key: ValueKey('archive-column-resizer-$index'),
                           colors: colors,
-                          semanticsLabel: '调整${labels[index]}列宽',
+                          semanticsLabel: '调整${columns[index].label}列宽',
                           onDrag: (delta) =>
                               onResize(index, delta, constraints.maxWidth),
                         ),
@@ -744,7 +784,7 @@ class _SortableHeaderLabel extends StatelessWidget {
           behavior: HitTestBehavior.opaque,
           onTap: () => onSort(column),
           child: Align(
-            alignment: _columnAlignment[column.index],
+            alignment: Alignment.centerLeft,
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -834,10 +874,19 @@ class _ArchiveRow extends StatefulWidget {
   const _ArchiveRow({
     required this.name,
     required this.isDirectory,
+    required this.columns,
     required this.columnFractions,
     this.size,
     this.packedSize,
     this.modified,
+    this.path,
+    this.totalSize,
+    this.itemCount,
+    this.method,
+    this.encrypted,
+    this.crc,
+    this.sourcePath,
+    this.attributes,
     this.onOpen,
     this.onExtract,
     this.onDelete,
@@ -849,10 +898,19 @@ class _ArchiveRow extends StatefulWidget {
 
   final String name;
   final bool isDirectory;
+  final List<ArchiveColumn> columns;
   final List<double> columnFractions;
   final int? size;
   final int? packedSize;
   final DateTime? modified;
+  final String? path;
+  final int? totalSize;
+  final int? itemCount;
+  final String? method;
+  final bool? encrypted;
+  final String? crc;
+  final String? sourcePath;
+  final String? attributes;
   final VoidCallback? onOpen;
   final VoidCallback? onExtract;
   final VoidCallback? onDelete;
@@ -916,90 +974,18 @@ class _ArchiveRowState extends State<_ArchiveRow> {
             ),
             child: Row(
               children: [
-                Expanded(
-                  flex: _columnFlex(widget.columnFractions[0]),
-                  child: Padding(
-                    padding: _columnPadding[0],
-                    child: Row(
-                      children: [
-                        if (widget.selectionMode) ...[
-                          FCheckbox(
-                            key: ValueKey('archive-select-${widget.name}'),
-                            semanticsLabel: '选择 ${widget.name}',
-                            value: widget.selected,
-                            onChange: widget.onSelectionChanged,
-                            enabled: widget.onSelectionChanged != null,
-                          ),
-                          const SizedBox(width: 10),
-                        ],
-                        Icon(
-                          widget.isDirectory
-                              ? FLucideIcons.folder
-                              : iconForArchiveEntry(widget.name),
-                          size: 17,
-                          color: widget.isDirectory
-                              ? colors.primary
-                              : colors.mutedForeground,
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Text(
-                            widget.name,
-                            overflow: TextOverflow.ellipsis,
-                            style: textStyle,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                Expanded(
-                  flex: _columnFlex(widget.columnFractions[1]),
-                  child: Padding(
-                    padding: _columnPadding[1],
-                    child: Align(
-                      alignment: _columnAlignment[1],
-                      child: Text(
-                        widget.isDirectory ? '—' : formatBytes(widget.size),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: textStyle,
+                for (var index = 0; index < widget.columns.length; index++)
+                  Expanded(
+                    flex: _columnFlex(widget.columnFractions[index]),
+                    child: Padding(
+                      padding: _columnPaddingFor(index, widget.columns.length),
+                      child: _buildColumn(
+                        widget.columns[index],
+                        colors,
+                        textStyle,
                       ),
                     ),
                   ),
-                ),
-                Expanded(
-                  flex: _columnFlex(widget.columnFractions[2]),
-                  child: Padding(
-                    padding: _columnPadding[2],
-                    child: Align(
-                      alignment: _columnAlignment[2],
-                      child: Text(
-                        widget.isDirectory
-                            ? '—'
-                            : formatBytes(widget.packedSize),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: textStyle,
-                      ),
-                    ),
-                  ),
-                ),
-                Expanded(
-                  flex: _columnFlex(widget.columnFractions[3]),
-                  child: Padding(
-                    padding: _columnPadding[3],
-                    child: Align(
-                      alignment: _columnAlignment[3],
-                      child: Text(
-                        formatDate(widget.modified),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: textStyle,
-                      ),
-                    ),
-                  ),
-                ),
               ],
             ),
           ),
@@ -1042,6 +1028,94 @@ class _ArchiveRowState extends State<_ArchiveRow> {
     );
   }
 
+  Widget _buildColumn(
+    ArchiveColumn column,
+    FColors colors,
+    TextStyle textStyle,
+  ) => switch (column) {
+    ArchiveColumn.name => Row(
+      children: [
+        if (widget.selectionMode) ...[
+          FCheckbox(
+            key: ValueKey('archive-select-${widget.name}'),
+            semanticsLabel: '选择 ${widget.name}',
+            value: widget.selected,
+            onChange: widget.onSelectionChanged,
+            enabled: widget.onSelectionChanged != null,
+          ),
+          const SizedBox(width: 10),
+        ],
+        Icon(
+          widget.isDirectory
+              ? FLucideIcons.folder
+              : iconForArchiveEntry(widget.name),
+          size: 17,
+          color: widget.isDirectory ? colors.primary : colors.mutedForeground,
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            widget.name,
+            overflow: TextOverflow.ellipsis,
+            style: textStyle,
+          ),
+        ),
+      ],
+    ),
+    ArchiveColumn.type => _ArchiveCellText(
+      archiveEntryType(widget.name, widget.isDirectory),
+      style: textStyle,
+    ),
+    ArchiveColumn.path => _ArchiveCellText(
+      widget.path ?? '—',
+      style: textStyle,
+    ),
+    ArchiveColumn.size => _ArchiveCellText(
+      widget.isDirectory ? '—' : formatBytes(widget.size),
+      style: textStyle,
+    ),
+    ArchiveColumn.totalSize => _ArchiveCellText(
+      widget.isDirectory ? formatBytes(widget.totalSize) : '—',
+      style: textStyle,
+    ),
+    ArchiveColumn.itemCount => _ArchiveCellText(
+      widget.isDirectory && widget.itemCount != null
+          ? '${widget.itemCount}'
+          : '—',
+      style: textStyle,
+    ),
+    ArchiveColumn.packedSize => _ArchiveCellText(
+      widget.isDirectory ? '—' : formatBytes(widget.packedSize),
+      style: textStyle,
+    ),
+    ArchiveColumn.compressionRatio => _ArchiveCellText(
+      formatCompressionRatio(widget.size, widget.packedSize),
+      style: textStyle,
+    ),
+    ArchiveColumn.modified => _ArchiveCellText(
+      formatDate(widget.modified),
+      style: textStyle,
+    ),
+    ArchiveColumn.method => _ArchiveCellText(
+      widget.method ?? '—',
+      style: textStyle,
+    ),
+    ArchiveColumn.encrypted => _ArchiveCellText(switch (widget.encrypted) {
+      true => '已加密',
+      false => '未加密',
+      null => '—',
+    }, style: textStyle),
+    ArchiveColumn.crc => _ArchiveCellText(widget.crc ?? '—', style: textStyle),
+    ArchiveColumn.sourcePath => _ArchiveCellText(
+      widget.sourcePath ?? '—',
+      style: textStyle,
+    ),
+    ArchiveColumn.attributes => _ArchiveCellText(
+      widget.attributes ?? '—',
+      style: textStyle,
+    ),
+  };
+
   void _resetDrag() {
     _dragOrigin = null;
     if (_dragStarted && mounted) {
@@ -1061,23 +1135,59 @@ class _ArchiveRowState extends State<_ArchiveRow> {
   }
 }
 
-const _columnPadding = [
-  EdgeInsets.only(right: 16),
-  EdgeInsets.symmetric(horizontal: 16),
-  EdgeInsets.symmetric(horizontal: 16),
-  EdgeInsets.only(left: 16),
-];
+class _ArchiveCellText extends StatelessWidget {
+  const _ArchiveCellText(this.value, {required this.style});
 
-const _columnAlignment = [
-  Alignment.centerLeft,
-  Alignment.centerLeft,
-  Alignment.centerLeft,
-  Alignment.centerLeft,
-];
+  final String value;
+  final TextStyle style;
+
+  @override
+  Widget build(BuildContext context) => Align(
+    alignment: Alignment.centerLeft,
+    child: Text(
+      value,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: style,
+    ),
+  );
+}
+
+EdgeInsets _columnPaddingFor(int index, int count) {
+  if (count <= 1) return EdgeInsets.zero;
+  if (index == 0) return const EdgeInsets.only(right: 16);
+  if (index == count - 1) return const EdgeInsets.only(left: 16);
+  return const EdgeInsets.symmetric(horizontal: 16);
+}
+
+List<double> _initialColumnFractions(List<ArchiveColumn> columns) {
+  final weights = columns
+      .map(
+        (column) => switch (column) {
+          ArchiveColumn.name => 5.0,
+          ArchiveColumn.type => 2.0,
+          ArchiveColumn.path => 4.0,
+          ArchiveColumn.size => 2.0,
+          ArchiveColumn.totalSize => 2.0,
+          ArchiveColumn.itemCount => 2.0,
+          ArchiveColumn.packedSize => 2.0,
+          ArchiveColumn.compressionRatio => 2.0,
+          ArchiveColumn.modified => 3.0,
+          ArchiveColumn.method => 3.0,
+          ArchiveColumn.encrypted => 2.0,
+          ArchiveColumn.crc => 3.0,
+          ArchiveColumn.sourcePath => 4.0,
+          ArchiveColumn.attributes => 3.0,
+        },
+      )
+      .toList();
+  final total = weights.fold(0.0, (sum, weight) => sum + weight);
+  return weights.map((weight) => weight / total).toList();
+}
 
 int _columnFlex(double fraction) => (fraction * 10000).round();
 
-enum ArchiveSortColumn { name, size, packedSize, modified }
+typedef ArchiveSortColumn = ArchiveColumn;
 
 enum ArchiveSortDirection { ascending, descending }
 
@@ -1119,10 +1229,19 @@ List<ArchiveEntry> visibleArchiveEntries(
         crc: entry.crc,
         method: entry.method,
         encrypted: entry.encrypted,
+        sourcePath: entry.sourcePath,
+        attributes: entry.attributes,
       );
     }
   }
   final nameKeys = <String, String>{};
+  final directoryStats = <String, ArchiveDirectoryStats>{};
+  ArchiveDirectoryStats? statsFor(ArchiveEntry entry) => entry.isDirectory
+      ? directoryStats.putIfAbsent(
+          entry.path,
+          () => archiveDirectoryStats(all, entry.path),
+        )
+      : null;
   int compareNames(ArchiveEntry a, ArchiveEntry b) {
     final aKey = nameKeys.putIfAbsent(a.name, () => _pinyinSortKey(a.name));
     final bKey = nameKeys.putIfAbsent(b.name, () => _pinyinSortKey(b.name));
@@ -1139,9 +1258,24 @@ List<ArchiveEntry> visibleArchiveEntries(
   int compareSorted(ArchiveEntry a, ArchiveEntry b) {
     final primary = switch (sort!.column) {
       ArchiveSortColumn.name => compareNames(a, b),
+      ArchiveSortColumn.type => archiveEntryType(
+        a.name,
+        a.isDirectory,
+      ).compareTo(archiveEntryType(b.name, b.isDirectory)),
+      ArchiveSortColumn.path => a.path.compareTo(b.path),
       ArchiveSortColumn.size => _compareNullable(
         a.size,
         b.size,
+        (left, right) => left.compareTo(right),
+      ),
+      ArchiveSortColumn.totalSize => _compareNullable(
+        statsFor(a)?.totalSize,
+        statsFor(b)?.totalSize,
+        (left, right) => left.compareTo(right),
+      ),
+      ArchiveSortColumn.itemCount => _compareNullable(
+        statsFor(a)?.itemCount,
+        statsFor(b)?.itemCount,
         (left, right) => left.compareTo(right),
       ),
       ArchiveSortColumn.packedSize => _compareNullable(
@@ -1149,9 +1283,39 @@ List<ArchiveEntry> visibleArchiveEntries(
         b.packedSize,
         (left, right) => left.compareTo(right),
       ),
+      ArchiveSortColumn.compressionRatio => _compareNullable(
+        compressionRatio(a.size, a.packedSize),
+        compressionRatio(b.size, b.packedSize),
+        (left, right) => left.compareTo(right),
+      ),
       ArchiveSortColumn.modified => _compareNullable(
         a.modified,
         b.modified,
+        (left, right) => left.compareTo(right),
+      ),
+      ArchiveSortColumn.method => _compareNullable(
+        a.method,
+        b.method,
+        (left, right) => left.compareTo(right),
+      ),
+      ArchiveSortColumn.encrypted => _compareNullable(
+        a.encrypted,
+        b.encrypted,
+        (left, right) => (left ? 1 : 0).compareTo(right ? 1 : 0),
+      ),
+      ArchiveSortColumn.crc => _compareNullable(
+        a.crc,
+        b.crc,
+        (left, right) => left.compareTo(right),
+      ),
+      ArchiveSortColumn.sourcePath => _compareNullable(
+        a.sourcePath,
+        b.sourcePath,
+        (left, right) => left.compareTo(right),
+      ),
+      ArchiveSortColumn.attributes => _compareNullable(
+        a.attributes,
+        b.attributes,
         (left, right) => left.compareTo(right),
       ),
     };
@@ -1161,6 +1325,54 @@ List<ArchiveEntry> visibleArchiveEntries(
 
   return visible.values.toList()
     ..sort(sort == null ? compareDefault : compareSorted);
+}
+
+class ArchiveDirectoryStats {
+  const ArchiveDirectoryStats({
+    required this.totalSize,
+    required this.itemCount,
+  });
+
+  final int totalSize;
+  final int itemCount;
+}
+
+ArchiveDirectoryStats archiveDirectoryStats(
+  List<ArchiveEntry> entries,
+  String directoryPath,
+) {
+  final normalizedDirectory = directoryPath
+      .replaceAll('\\', '/')
+      .replaceFirst(RegExp(r'^/+'), '')
+      .replaceFirst(RegExp(r'/+$'), '');
+  final prefix = '$normalizedDirectory/';
+  var totalSize = 0;
+  var itemCount = 0;
+  for (final entry in entries) {
+    final path = entry.path
+        .replaceAll('\\', '/')
+        .replaceFirst(RegExp(r'^/+'), '');
+    if (entry.isDirectory || !path.startsWith(prefix)) continue;
+    itemCount++;
+    totalSize += entry.size ?? 0;
+  }
+  return ArchiveDirectoryStats(totalSize: totalSize, itemCount: itemCount);
+}
+
+String archiveEntryType(String name, bool isDirectory) {
+  if (isDirectory) return '文件夹';
+  final extension = p.extension(name).replaceFirst('.', '').toUpperCase();
+  return extension.isEmpty ? '文件' : '$extension 文件';
+}
+
+double? compressionRatio(int? size, int? packedSize) {
+  if (size == null || size <= 0 || packedSize == null) return null;
+  return 1 - packedSize / size;
+}
+
+String formatCompressionRatio(int? size, int? packedSize) {
+  final ratio = compressionRatio(size, packedSize);
+  return ratio == null ? '—' : '${(ratio * 100).toStringAsFixed(1)}%';
 }
 
 int _compareNullable<T>(

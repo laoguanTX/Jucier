@@ -604,6 +604,7 @@ class SevenZipEngine implements ArchiveEngine {
           crc: record['CRC'],
           method: record['Method'],
           encrypted: record['Encrypted'] == '+',
+          attributes: attributes.isEmpty ? null : attributes,
         ),
       );
     }

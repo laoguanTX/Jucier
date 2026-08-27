@@ -68,6 +68,16 @@ class ArchiveWorkflowController extends ChangeNotifier {
     }
   }
 
+  Future<void> addEntries(AddEntriesOptions options) async {
+    _beginOperation('正在添加到 ${p.basename(options.archivePath)}', progress: 0);
+    try {
+      await _engine.addEntries(options, onProgress: _updateProgress);
+      await _refreshIfCurrent(options.archivePath);
+    } finally {
+      _endOperation();
+    }
+  }
+
   Future<void> updateEntry({
     required String archivePath,
     required String entryPath,

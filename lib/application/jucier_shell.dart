@@ -18,6 +18,7 @@ import '../dialogs/extract_dialog.dart';
 import '../dialogs/message_dialog.dart';
 import '../dialogs/password_dialog.dart';
 import '../platform/file_access_service.dart';
+import '../platform/archive_drag_service.dart';
 import '../platform/file_preview_service.dart';
 import '../platform/single_entry_extraction_preference_store.dart';
 import '../screens/archive_screen.dart';
@@ -62,6 +63,9 @@ class JucierShell extends StatefulWidget {
 class _JucierShellState extends State<JucierShell> {
   late final ArchiveWorkflowController _workflow;
   late final FilePreviewService _previews;
+  late final MacOSArchiveDragService _archiveDragService;
+  final Map<String, _ArchiveDragPayload> _dragPayloads = {};
+  int _nextDragId = 0;
   Future<void> _previewPromptQueue = Future.value();
   bool _settingsOpen = false;
 
@@ -73,6 +77,9 @@ class _JucierShellState extends State<JucierShell> {
       launcher: widget.fileLauncher ?? MacOSFileLauncher(),
       onChanged: _handlePreviewChanged,
     );
+    _archiveDragService = MacOSArchiveDragService(
+      onMaterialize: _materializeDraggedEntry,
+    );
     widget.fileAccessService.setOpenSettingsHandler(_openSettings);
     WidgetsBinding.instance.addPostFrameCallback(
       (_) => _requestInitialAccess(),
@@ -83,6 +90,7 @@ class _JucierShellState extends State<JucierShell> {
   void dispose() {
     widget.fileAccessService.setOpenSettingsHandler(null);
     unawaited(_previews.dispose());
+    _archiveDragService.dispose();
     _workflow.dispose();
     super.dispose();
   }
@@ -163,6 +171,8 @@ class _JucierShellState extends State<JucierShell> {
       onDeleteEntry: _deleteEntry,
       onExtractEntries: _extractEntries,
       onDeleteEntries: _deleteEntries,
+      onDropped: _addDroppedEntries,
+      onDragEntries: _dragEntries,
     );
   }
 
@@ -340,6 +350,101 @@ class _JucierShellState extends State<JucierShell> {
     }
   }
 
+  Future<void> _addDroppedEntries(List<String> paths, String directory) async {
+    final listing = _workflow.listing;
+    if (listing == null ||
+        _workflow.busy ||
+        _archiveDragService.dragInProgress ||
+        paths.isEmpty) {
+      return;
+    }
+    try {
+      await _workflow.addEntries(
+        AddEntriesOptions(
+          archivePath: listing.archivePath,
+          sources: paths,
+          destinationDirectory: directory,
+          password: _workflow.password,
+        ),
+      );
+      if (mounted) {
+        await showMessageDialog(
+          context,
+          title: '添加完成',
+          message:
+              '${paths.length} 个项目已添加到${directory.isEmpty ? '压缩包根目录' : '/$directory'}。',
+        );
+      }
+    } on ArchiveCancelledException {
+      // Explicit cancellations do not need an error dialog.
+    } on ArchiveException catch (error) {
+      if (mounted) {
+        await showMessageDialog(context, title: '添加失败', message: error.message);
+      }
+    }
+  }
+
+  Future<void> _dragEntries(List<ArchiveEntry> requestedEntries) async {
+    final listing = _workflow.listing;
+    if (listing == null || _workflow.busy || requestedEntries.isEmpty) return;
+    final entries = _topLevelEntries(requestedEntries);
+    final batch = DateTime.now().microsecondsSinceEpoch;
+    final ids = <String>[];
+    final items = <ArchiveDragItem>[];
+    for (final entry in entries) {
+      final id = '$batch-${_nextDragId++}';
+      ids.add(id);
+      _dragPayloads[id] = _ArchiveDragPayload(
+        archivePath: listing.archivePath,
+        password: _workflow.password,
+        entry: entry,
+        entryPaths: _pathsForEntry(listing, entry),
+      );
+      items.add(
+        ArchiveDragItem(
+          id: id,
+          name: entry.name,
+          isDirectory: entry.isDirectory,
+        ),
+      );
+    }
+
+    try {
+      await _archiveDragService.beginDrag(items);
+    } on ArchiveException catch (error) {
+      if (mounted) {
+        await showMessageDialog(
+          context,
+          title: '无法拖出文件',
+          message: error.message,
+        );
+      }
+    } finally {
+      for (final id in ids) {
+        _dragPayloads.remove(id);
+      }
+    }
+  }
+
+  Future<void> _materializeDraggedEntry(
+    ArchiveDragMaterializationRequest request,
+  ) async {
+    final payload = _dragPayloads[request.id];
+    if (payload == null) throw const ArchiveException('拖拽项目已失效');
+    await _workflow.waitUntilIdle();
+    await _workflow.extractEntries(
+      ExtractEntriesOptions(
+        archivePath: payload.archivePath,
+        entryPaths: payload.entryPaths,
+        outputDirectory: p.dirname(request.outputPath),
+        outputPath: request.outputPath,
+        password: payload.password,
+        withoutParentDirectories: true,
+        selectedEntryPath: payload.entry.path,
+      ),
+    );
+  }
+
   Future<void> _extractEntry(ArchiveEntry entry) async {
     await _extractEntries([entry]);
   }
@@ -423,7 +528,7 @@ class _JucierShellState extends State<JucierShell> {
     final confirmed = await showConfirmationDialog(
       context,
       title: '从压缩包中删除？',
-      message: '$description 将从 ${p.basename(listing.archivePath)} 中永久删除。',
+      message: '$description将从 ${p.basename(listing.archivePath)} 中永久删除。',
       confirmLabel: '删除',
       destructive: true,
     );
@@ -533,4 +638,18 @@ class _JucierShellState extends State<JucierShell> {
 
 class _OpenSettingsIntent extends Intent {
   const _OpenSettingsIntent();
+}
+
+class _ArchiveDragPayload {
+  const _ArchiveDragPayload({
+    required this.archivePath,
+    required this.password,
+    required this.entry,
+    required this.entryPaths,
+  });
+
+  final String archivePath;
+  final String? password;
+  final ArchiveEntry entry;
+  final List<String> entryPaths;
 }

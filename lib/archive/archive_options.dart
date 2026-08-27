@@ -69,6 +69,7 @@ class ExtractEntriesOptions {
     this.conflict = ExtractionConflict.overwrite,
     this.withoutParentDirectories = false,
     this.selectedEntryPath,
+    this.outputPath,
   });
 
   final String archivePath;
@@ -78,4 +79,19 @@ class ExtractEntriesOptions {
   final ExtractionConflict conflict;
   final bool withoutParentDirectories;
   final String? selectedEntryPath;
+  final String? outputPath;
+}
+
+class AddEntriesOptions {
+  const AddEntriesOptions({
+    required this.archivePath,
+    required this.sources,
+    required this.destinationDirectory,
+    this.password,
+  });
+
+  final String archivePath;
+  final List<String> sources;
+  final String destinationDirectory;
+  final String? password;
 }

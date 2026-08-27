@@ -1,5 +1,112 @@
 import Cocoa
 import FlutterMacOS
+import UniformTypeIdentifiers
+
+private class ArchiveFilePromiseDragSource: NSObject,
+  NSFilePromiseProviderDelegate, NSDraggingSource {
+  private let channel: FlutterMethodChannel
+  private var itemByProvider: [ObjectIdentifier: [String: Any]] = [:]
+  private var expectedPromiseCount = 0
+  private var completedPromiseCount = 0
+  private var sessionHasEnded = false
+  private var didFinish = false
+  var onEnded: (() -> Void)?
+
+  init(channel: FlutterMethodChannel) {
+    self.channel = channel
+  }
+
+  func register(_ provider: NSFilePromiseProvider, item: [String: Any]) {
+    itemByProvider[ObjectIdentifier(provider)] = item
+    expectedPromiseCount += 1
+  }
+
+  func filePromiseProvider(
+    _ filePromiseProvider: NSFilePromiseProvider,
+    fileNameForType fileType: String
+  ) -> String {
+    itemByProvider[ObjectIdentifier(filePromiseProvider)]?["name"] as? String
+      ?? "Archive Item"
+  }
+
+  func filePromiseProvider(
+    _ filePromiseProvider: NSFilePromiseProvider,
+    writePromiseTo url: URL,
+    completionHandler: @escaping (Error?) -> Void
+  ) {
+    guard let item = itemByProvider[ObjectIdentifier(filePromiseProvider)],
+      let id = item["id"] as? String else {
+      completionHandler(NSError(
+        domain: "dev.jucier.file-drag",
+        code: 1,
+        userInfo: [NSLocalizedDescriptionKey: "拖拽项目已失效"]))
+      return
+    }
+
+    let accessing = url.startAccessingSecurityScopedResource()
+    channel.invokeMethod(
+      "materialize",
+      arguments: ["id": id, "outputPath": url.path]
+    ) { result in
+      if accessing {
+        url.stopAccessingSecurityScopedResource()
+      }
+      if let flutterError = result as? FlutterError {
+        completionHandler(NSError(
+          domain: "dev.jucier.file-drag",
+          code: 2,
+          userInfo: [NSLocalizedDescriptionKey: flutterError.message ?? "部分解压失败"]))
+      } else {
+        completionHandler(nil)
+      }
+      self.completedPromiseCount += 1
+      self.finishIfPossible()
+    }
+  }
+
+  func operationQueue(for filePromiseProvider: NSFilePromiseProvider) -> OperationQueue {
+    OperationQueue.main
+  }
+
+  func draggingSession(
+    _ session: NSDraggingSession,
+    sourceOperationMaskFor context: NSDraggingContext
+  ) -> NSDragOperation {
+    context == .withinApplication ? [] : .copy
+  }
+
+  func ignoreModifierKeys(for session: NSDraggingSession) -> Bool {
+    true
+  }
+
+  func draggingSession(
+    _ session: NSDraggingSession,
+    endedAt screenPoint: NSPoint,
+    operation: NSDragOperation
+  ) {
+    sessionHasEnded = true
+    if operation.isEmpty {
+      finish()
+    } else {
+      finishIfPossible()
+      DispatchQueue.main.asyncAfter(deadline: .now() + 60) { [weak self] in
+        self?.finish()
+      }
+    }
+  }
+
+  private func finishIfPossible() {
+    if sessionHasEnded && completedPromiseCount >= expectedPromiseCount {
+      finish()
+    }
+  }
+
+  private func finish() {
+    guard !didFinish else { return }
+    didFinish = true
+    onEnded?()
+  }
+}
 
 class MainFlutterWindow: NSWindow {
   private let platformChannelName = "dev.jucier/platform"
@@ -9,6 +116,8 @@ class MainFlutterWindow: NSWindow {
   private let themeModeKey = "themeMode"
   private let singleEntryExtractionModeKey = "singleEntryExtractionMode"
   private var scopedURL: URL?
+  private var archiveDragSource: ArchiveFilePromiseDragSource?
+  private var archiveDragResult: FlutterResult?
 
   override func awakeFromNib() {
     let flutterViewController = FlutterViewController()
@@ -29,9 +138,90 @@ class MainFlutterWindow: NSWindow {
 
     RegisterGeneratedPlugins(registry: flutterViewController)
     configurePlatformChannel(flutterViewController)
+    configureFileDragChannel(flutterViewController)
     restoreFileAccess()
 
     super.awakeFromNib()
+  }
+
+  private func configureFileDragChannel(_ controller: FlutterViewController) {
+    let channel = FlutterMethodChannel(
+      name: "dev.jucier/file_drag",
+      binaryMessenger: controller.engine.binaryMessenger)
+
+    channel.setMethodCallHandler { [weak self] call, result in
+      guard let self else { return }
+      guard call.method == "beginDrag" else {
+        result(FlutterMethodNotImplemented)
+        return
+      }
+      self.beginArchiveEntryDrag(call.arguments, channel: channel, result: result)
+    }
+  }
+
+  private func beginArchiveEntryDrag(
+    _ value: Any?,
+    channel: FlutterMethodChannel,
+    result: @escaping FlutterResult
+  ) {
+    guard archiveDragSource == nil else {
+      result(FlutterError(
+        code: "drag_in_progress",
+        message: "已有文件拖拽正在进行",
+        details: nil))
+      return
+    }
+    guard let items = value as? [[String: Any]], !items.isEmpty,
+      let event = NSApp.currentEvent,
+      let contentView else {
+      result(FlutterError(
+        code: "invalid_drag",
+        message: "无法开始文件拖拽，请重新拖动文件",
+        details: value))
+      return
+    }
+
+    let source = ArchiveFilePromiseDragSource(channel: channel)
+    let point = contentView.convert(event.locationInWindow, from: nil)
+    var draggingItems: [NSDraggingItem] = []
+    for item in items {
+      guard let name = item["name"] as? String,
+        let id = item["id"] as? String else { continue }
+      let isDirectory = item["isDirectory"] as? Bool ?? false
+      let contentType: UTType = isDirectory ? .folder : .data
+      let fileType = contentType.identifier
+      let provider = NSFilePromiseProvider(fileType: fileType, delegate: source)
+      source.register(provider, item: [
+        "id": id,
+        "name": name,
+        "isDirectory": isDirectory,
+      ])
+      let draggingItem = NSDraggingItem(pasteboardWriter: provider)
+      let image = NSWorkspace.shared.icon(for: contentType)
+      draggingItem.setDraggingFrame(
+        NSRect(x: point.x - 24, y: point.y - 24, width: 48, height: 48),
+        contents: image)
+      draggingItems.append(draggingItem)
+    }
+    guard !draggingItems.isEmpty else {
+      result(FlutterError(
+        code: "invalid_drag_items",
+        message: "没有可拖出的文件",
+        details: value))
+      return
+    }
+
+    archiveDragSource = source
+    archiveDragResult = result
+    source.onEnded = { [weak self] in
+      self?.archiveDragResult?(nil)
+      self?.archiveDragResult = nil
+      self?.archiveDragSource = nil
+    }
+    contentView.beginDraggingSession(
+      with: draggingItems,
+      event: event,
+      source: source)
   }
 
   private func configurePlatformChannel(_ controller: FlutterViewController) {

@@ -23,6 +23,11 @@ abstract interface class ArchiveEngine {
     ProgressCallback? onProgress,
   });
 
+  Future<void> addEntries(
+    AddEntriesOptions options, {
+    ProgressCallback? onProgress,
+  });
+
   Future<void> updateEntry({
     required String archivePath,
     required String entryPath,

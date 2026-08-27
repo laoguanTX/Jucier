@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:desktop_drop/desktop_drop.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter/semantics.dart';
 import 'package:forui/forui.dart';
@@ -9,6 +12,11 @@ import '../archive/archive_entry.dart';
 typedef ArchiveEntriesCallback = Future<bool> Function(
   List<ArchiveEntry> entries,
 );
+typedef ArchiveDropCallback = Future<void> Function(
+  List<String> paths,
+  String directory,
+);
+typedef ArchiveDragCallback = Future<void> Function(List<ArchiveEntry> entries);
 
 class ArchiveScreen extends StatefulWidget {
   const ArchiveScreen({
@@ -22,6 +30,8 @@ class ArchiveScreen extends StatefulWidget {
     required this.onDeleteEntry,
     required this.onExtractEntries,
     required this.onDeleteEntries,
+    required this.onDropped,
+    required this.onDragEntries,
     super.key,
   });
 
@@ -35,6 +45,8 @@ class ArchiveScreen extends StatefulWidget {
   final ValueChanged<ArchiveEntry> onDeleteEntry;
   final ArchiveEntriesCallback onExtractEntries;
   final ArchiveEntriesCallback onDeleteEntries;
+  final ArchiveDropCallback onDropped;
+  final ArchiveDragCallback onDragEntries;
 
   @override
   State<ArchiveScreen> createState() => _ArchiveScreenState();
@@ -45,6 +57,8 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
   List<double> _columnFractions = const [5 / 12, 2 / 12, 2 / 12, 3 / 12];
   ArchiveSort? _sort;
   bool _selectionMode = false;
+  bool _draggingIntoArchive = false;
+  bool _draggingEntriesOut = false;
   final Map<String, ArchiveEntry> _selectedEntries = {};
 
   @override
@@ -74,7 +88,7 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
       sort: _sort,
     );
 
-    return Column(
+    final content = Column(
       children: [
         Container(
           height: 62,
@@ -241,6 +255,9 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
                           : () => widget.onPreviewEntry(entry),
                       onExtract: () => widget.onExtractEntry(entry),
                       onDelete: () => widget.onDeleteEntry(entry),
+                      onDragStarted: widget.enabled
+                          ? () => _startDraggingEntry(entry)
+                          : null,
                     );
                   },
                 ),
@@ -260,6 +277,60 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
           ),
         ),
       ],
+    );
+    return DropTarget(
+      enable: widget.enabled && !_draggingEntriesOut,
+      onDragEntered: (_) {
+        if (_draggingEntriesOut) return;
+        setState(() => _draggingIntoArchive = true);
+      },
+      onDragExited: (_) => setState(() => _draggingIntoArchive = false),
+      onDragDone: (details) {
+        setState(() => _draggingIntoArchive = false);
+        if (_draggingEntriesOut) return;
+        unawaited(
+          widget.onDropped(
+            details.files.map((file) => file.path).toList(),
+            _directory,
+          ),
+        );
+      },
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          content,
+          if (_draggingIntoArchive)
+            Positioned.fill(
+              child: IgnorePointer(
+                child: Container(
+                  key: const ValueKey('archive-drop-overlay'),
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: colors.primary.withValues(alpha: 0.08),
+                    border: Border.all(color: colors.primary, width: 2),
+                  ),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 18,
+                      vertical: 12,
+                    ),
+                    decoration: BoxDecoration(
+                      color: colors.background,
+                      border: Border.all(color: colors.primary),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Text(
+                      _directory.isEmpty ? '添加到压缩包根目录' : '添加到 /$_directory',
+                      style: context.theme.typography.body.md.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
     );
   }
 
@@ -311,6 +382,22 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
       _selectionMode = false;
       _selectedEntries.clear();
     });
+  }
+
+  Future<void> _startDraggingEntry(ArchiveEntry entry) async {
+    if (_draggingEntriesOut) return;
+    final entries = _selectionMode && _selectedEntries.containsKey(entry.path)
+        ? List<ArchiveEntry>.of(_selectedEntries.values)
+        : [entry];
+    setState(() {
+      _draggingEntriesOut = true;
+      _draggingIntoArchive = false;
+    });
+    try {
+      await widget.onDragEntries(entries);
+    } finally {
+      if (mounted) setState(() => _draggingEntriesOut = false);
+    }
   }
 
   void _resizeColumns(int index, double delta, double availableWidth) {
@@ -698,6 +785,7 @@ class _ArchiveRow extends StatefulWidget {
     this.selectionMode = false,
     this.selected = false,
     this.onSelectionChanged,
+    this.onDragStarted,
   });
 
   final String name;
@@ -712,6 +800,7 @@ class _ArchiveRow extends StatefulWidget {
   final bool selectionMode;
   final bool selected;
   final ValueChanged<bool>? onSelectionChanged;
+  final Future<void> Function()? onDragStarted;
 
   @override
   State<_ArchiveRow> createState() => _ArchiveRowState();
@@ -719,113 +808,141 @@ class _ArchiveRow extends StatefulWidget {
 
 class _ArchiveRowState extends State<_ArchiveRow> {
   bool _hovered = false;
+  Offset? _dragOrigin;
+  bool _dragStarted = false;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.theme.colors;
     final textStyle = context.theme.typography.body.sm;
-    final row = MouseRegion(
-      onEnter: (_) => setState(() => _hovered = true),
-      onExit: (_) => setState(() => _hovered = false),
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: widget.selectionMode
-            ? () => widget.onSelectionChanged?.call(!widget.selected)
-            : null,
-        onDoubleTap: widget.selectionMode ? null : widget.onOpen,
-        child: Container(
-          key: ValueKey('archive-row-${widget.name}'),
-          height: 42,
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          decoration: BoxDecoration(
-            color: _hovered ? colors.secondary : null,
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Row(
-            children: [
-              Expanded(
-                flex: _columnFlex(widget.columnFractions[0]),
-                child: Padding(
-                  padding: _columnPadding[0],
-                  child: Row(
-                    children: [
-                      if (widget.selectionMode) ...[
-                        FCheckbox(
-                          key: ValueKey('archive-select-${widget.name}'),
-                          semanticsLabel: '选择 ${widget.name}',
-                          value: widget.selected,
-                          onChange: widget.onSelectionChanged,
-                          enabled: widget.onSelectionChanged != null,
+    final row = Listener(
+      onPointerDown: (event) {
+        if (event.buttons & 1 != 0 && widget.onDragStarted != null) {
+          _dragOrigin = event.position;
+          _dragStarted = false;
+        }
+      },
+      onPointerMove: (event) {
+        final origin = _dragOrigin;
+        if (origin != null &&
+            !_dragStarted &&
+            event.buttons & 1 != 0 &&
+            (event.position - origin).distance >= 5) {
+          setState(() => _dragStarted = true);
+          unawaited(_beginDrag());
+        }
+      },
+      onPointerUp: (_) => _resetDrag(),
+      onPointerCancel: (_) => _resetDrag(),
+      child: MouseRegion(
+        key: ValueKey('archive-row-mouse-${widget.name}'),
+        cursor: _dragStarted
+            ? SystemMouseCursors.grab
+            : SystemMouseCursors.basic,
+        onEnter: (_) => setState(() => _hovered = true),
+        onExit: (_) => setState(() => _hovered = false),
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: widget.selectionMode
+              ? () => widget.onSelectionChanged?.call(!widget.selected)
+              : null,
+          onDoubleTap: widget.selectionMode ? null : widget.onOpen,
+          child: Container(
+            key: ValueKey('archive-row-${widget.name}'),
+            height: 42,
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            decoration: BoxDecoration(
+              color: _hovered ? colors.secondary : null,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  flex: _columnFlex(widget.columnFractions[0]),
+                  child: Padding(
+                    padding: _columnPadding[0],
+                    child: Row(
+                      children: [
+                        if (widget.selectionMode) ...[
+                          FCheckbox(
+                            key: ValueKey('archive-select-${widget.name}'),
+                            semanticsLabel: '选择 ${widget.name}',
+                            value: widget.selected,
+                            onChange: widget.onSelectionChanged,
+                            enabled: widget.onSelectionChanged != null,
+                          ),
+                          const SizedBox(width: 10),
+                        ],
+                        Icon(
+                          widget.isDirectory
+                              ? FLucideIcons.folder
+                              : iconForArchiveEntry(widget.name),
+                          size: 17,
+                          color: widget.isDirectory
+                              ? colors.primary
+                              : colors.mutedForeground,
                         ),
                         const SizedBox(width: 10),
-                      ],
-                      Icon(
-                        widget.isDirectory
-                            ? FLucideIcons.folder
-                            : iconForArchiveEntry(widget.name),
-                        size: 17,
-                        color: widget.isDirectory
-                            ? colors.primary
-                            : colors.mutedForeground,
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          widget.name,
-                          overflow: TextOverflow.ellipsis,
-                          style: textStyle,
+                        Expanded(
+                          child: Text(
+                            widget.name,
+                            overflow: TextOverflow.ellipsis,
+                            style: textStyle,
+                          ),
                         ),
+                      ],
+                    ),
+                  ),
+                ),
+                Expanded(
+                  flex: _columnFlex(widget.columnFractions[1]),
+                  child: Padding(
+                    padding: _columnPadding[1],
+                    child: Align(
+                      alignment: _columnAlignment[1],
+                      child: Text(
+                        widget.isDirectory ? '—' : formatBytes(widget.size),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: textStyle,
                       ),
-                    ],
-                  ),
-                ),
-              ),
-              Expanded(
-                flex: _columnFlex(widget.columnFractions[1]),
-                child: Padding(
-                  padding: _columnPadding[1],
-                  child: Align(
-                    alignment: _columnAlignment[1],
-                    child: Text(
-                      widget.isDirectory ? '—' : formatBytes(widget.size),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: textStyle,
                     ),
                   ),
                 ),
-              ),
-              Expanded(
-                flex: _columnFlex(widget.columnFractions[2]),
-                child: Padding(
-                  padding: _columnPadding[2],
-                  child: Align(
-                    alignment: _columnAlignment[2],
-                    child: Text(
-                      widget.isDirectory ? '—' : formatBytes(widget.packedSize),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: textStyle,
+                Expanded(
+                  flex: _columnFlex(widget.columnFractions[2]),
+                  child: Padding(
+                    padding: _columnPadding[2],
+                    child: Align(
+                      alignment: _columnAlignment[2],
+                      child: Text(
+                        widget.isDirectory
+                            ? '—'
+                            : formatBytes(widget.packedSize),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: textStyle,
+                      ),
                     ),
                   ),
                 ),
-              ),
-              Expanded(
-                flex: _columnFlex(widget.columnFractions[3]),
-                child: Padding(
-                  padding: _columnPadding[3],
-                  child: Align(
-                    alignment: _columnAlignment[3],
-                    child: Text(
-                      formatDate(widget.modified),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: textStyle,
+                Expanded(
+                  flex: _columnFlex(widget.columnFractions[3]),
+                  child: Padding(
+                    padding: _columnPadding[3],
+                    child: Align(
+                      alignment: _columnAlignment[3],
+                      child: Text(
+                        formatDate(widget.modified),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: textStyle,
+                      ),
                     ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -864,6 +981,24 @@ class _ArchiveRowState extends State<_ArchiveRow> {
       ],
       child: row,
     );
+  }
+
+  void _resetDrag() {
+    _dragOrigin = null;
+    if (_dragStarted && mounted) {
+      setState(() => _dragStarted = false);
+    } else {
+      _dragStarted = false;
+    }
+  }
+
+  Future<void> _beginDrag() async {
+    try {
+      await widget.onDragStarted?.call();
+    } finally {
+      _dragOrigin = null;
+      if (_dragStarted && mounted) setState(() => _dragStarted = false);
+    }
   }
 }
 

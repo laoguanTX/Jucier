@@ -131,6 +131,28 @@ void main() {
         isFalse,
       );
 
+      final promisedOutput = p.join(
+        temporary.path,
+        'promised-file',
+        'renamed-by-finder.txt',
+      );
+      await engine.extractEntries(
+        ExtractEntriesOptions(
+          archivePath: archive,
+          entryPaths: const ['Parent/Folder/a.txt'],
+          selectedEntryPath: 'Parent/Folder/a.txt',
+          outputDirectory: p.dirname(promisedOutput),
+          outputPath: promisedOutput,
+          withoutParentDirectories: true,
+        ),
+      );
+      expect(await File(promisedOutput).readAsString(), 'a');
+      expect(
+        await Directory(promisedOutput).exists(),
+        isFalse,
+        reason: 'The promised file path must not become a directory.',
+      );
+
       final flatFolderOutput = p.join(temporary.path, 'flat-folder');
       await engine.extractEntries(
         ExtractEntriesOptions(
@@ -182,4 +204,61 @@ void main() {
     },
     skip: skip ? 'Build assets/sevenzip/7zz first.' : false,
   );
+
+  test('adds dropped files and folders to an archive subdirectory', () async {
+    final temporary = await Directory.systemTemp.createTemp(
+      'jucier-add-entries-e2e-',
+    );
+    addTearDown(() => temporary.delete(recursive: true));
+
+    final original = File(p.join(temporary.path, 'original.txt'));
+    await original.writeAsString('original');
+    final archive = p.join(temporary.path, 'drop-target.7z');
+    final engine = SevenZipEngine(executablePath: executable);
+    await engine.create(
+      CreateArchiveOptions(
+        archivePath: archive,
+        sources: [original.path],
+        format: ArchiveFormat.sevenZip,
+      ),
+    );
+
+    final addedFile = File(p.join(temporary.path, 'added.txt'));
+    await addedFile.writeAsString('added');
+    final addedFolder = Directory(p.join(temporary.path, 'DroppedFolder'));
+    await addedFolder.create();
+    await File(p.join(addedFolder.path, 'child.txt')).writeAsString('child');
+
+    await engine.addEntries(
+      AddEntriesOptions(
+        archivePath: archive,
+        sources: [addedFile.path, addedFolder.path],
+        destinationDirectory: 'Current/Inner',
+      ),
+    );
+    final listing = await engine.list(archive);
+    expect(
+      listing.entries.map((entry) => entry.path),
+      containsAll([
+        'Current/Inner/added.txt',
+        'Current/Inner/DroppedFolder/child.txt',
+      ]),
+    );
+
+    final output = p.join(temporary.path, 'output');
+    await engine.extract(
+      ExtractArchiveOptions(archivePath: archive, outputDirectory: output),
+    );
+    expect(
+      await File(p.join(output, 'Current', 'Inner', 'added.txt'))
+          .readAsString(),
+      'added',
+    );
+    expect(
+      await File(
+        p.join(output, 'Current', 'Inner', 'DroppedFolder', 'child.txt'),
+      ).readAsString(),
+      'child',
+    );
+  }, skip: skip ? 'Build assets/sevenzip/7zz first.' : false);
 }

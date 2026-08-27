@@ -159,6 +159,66 @@ class SevenZipEngine implements ArchiveEngine {
     _ensureFilesProcessed(output);
   }
 
+  @override
+  Future<void> addEntries(
+    AddEntriesOptions options, {
+    ProgressCallback? onProgress,
+  }) async {
+    if (options.sources.isEmpty) {
+      throw const ArchiveException('没有可添加到压缩包的文件');
+    }
+    final destination = options.destinationDirectory.isEmpty
+        ? ''
+        : normalizeArchiveEntryPath(options.destinationDirectory);
+    final staging = await Directory.systemTemp.createTemp('jucier-add-');
+    try {
+      final relativePaths = <String>[];
+      for (final sourcePath in options.sources) {
+        final sourceType = await FileSystemEntity.type(sourcePath);
+        if (sourceType == FileSystemEntityType.notFound) {
+          throw ArchiveException('找不到要添加的文件：${p.basename(sourcePath)}');
+        }
+        final baseName = p.basename(sourcePath);
+        var relativePath = destination.isEmpty
+            ? baseName
+            : p.posix.join(destination, baseName);
+        var linkPath = p.joinAll([
+          staging.path,
+          ...p.posix.split(relativePath),
+        ]);
+        for (
+          var suffix = 1;
+          await FileSystemEntity.type(linkPath, followLinks: false) !=
+              FileSystemEntityType.notFound;
+          suffix++
+        ) {
+          final isDirectory = sourceType == FileSystemEntityType.directory;
+          final extension = isDirectory ? '' : p.extension(baseName);
+          final stem = isDirectory
+              ? baseName
+              : p.basenameWithoutExtension(baseName);
+          final uniqueName = '$stem ($suffix)$extension';
+          relativePath = destination.isEmpty
+              ? uniqueName
+              : p.posix.join(destination, uniqueName);
+          linkPath = p.joinAll([staging.path, ...p.posix.split(relativePath)]);
+        }
+        await Directory(p.dirname(linkPath)).create(recursive: true);
+        await Link(linkPath).create(File(sourcePath).absolute.path);
+        relativePaths.add(relativePath);
+      }
+
+      final args = <String>['a', options.archivePath, '-y', '-bsp1', '-bb1'];
+      if (options.password case final password? when password.isNotEmpty) {
+        args.add('-p$password');
+      }
+      args.addAll(relativePaths);
+      await _run(args, onProgress: onProgress, workingDirectory: staging.path);
+    } finally {
+      if (await staging.exists()) await staging.delete(recursive: true);
+    }
+  }
+
   Future<void> _extractEntriesWithoutParents(
     ExtractEntriesOptions options,
     List<String> entries,
@@ -193,6 +253,7 @@ class SevenZipEngine implements ArchiveEngine {
         sourcePath,
         options.outputDirectory,
         options.conflict,
+        outputPath: options.outputPath,
       );
     } finally {
       if (await staging.exists()) await staging.delete(recursive: true);
@@ -202,8 +263,9 @@ class SevenZipEngine implements ArchiveEngine {
   Future<void> _copySelectedEntry(
     String sourcePath,
     String outputDirectory,
-    ExtractionConflict conflict,
-  ) async {
+    ExtractionConflict conflict, {
+    String? outputPath,
+  }) async {
     final sourceType = await FileSystemEntity.type(
       sourcePath,
       followLinks: false,
@@ -215,9 +277,9 @@ class SevenZipEngine implements ArchiveEngine {
       throw const ArchiveException('暂不支持单独解压符号链接');
     }
 
-    final output = Directory(outputDirectory);
-    await output.create(recursive: true);
-    final targetPath = p.join(output.path, p.basename(sourcePath));
+    final targetPath =
+        outputPath ?? p.join(outputDirectory, p.basename(sourcePath));
+    await Directory(p.dirname(targetPath)).create(recursive: true);
     if (sourceType == FileSystemEntityType.file) {
       await _copyFile(File(sourcePath), targetPath, conflict);
       return;

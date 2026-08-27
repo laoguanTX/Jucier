@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
+import 'package:desktop_drop/desktop_drop.dart';
 import 'package:flutter/gestures.dart';
 import 'package:forui/forui.dart';
 import 'package:jucier/archive/archive_entry.dart';
@@ -367,6 +370,167 @@ void main() {
     expect(find.byType(FCheckbox), findsNothing);
     expect(find.text('多选'), findsOneWidget);
   });
+
+  testWidgets('drops external items into the current archive directory', (
+    tester,
+  ) async {
+    const listing = ArchiveListing(
+      archivePath: '/tmp/example.zip',
+      entries: [ArchiveEntry(path: 'Docs/existing.txt', isDirectory: false)],
+    );
+    List<String>? droppedPaths;
+    String? droppedDirectory;
+    await _pumpArchiveScreen(
+      tester,
+      listing,
+      onDropped: (paths, directory) async {
+        droppedPaths = paths;
+        droppedDirectory = directory;
+      },
+    );
+    await _doubleTap(tester, find.text('Docs'));
+
+    final target = tester.widget<DropTarget>(find.byType(DropTarget));
+    target.onDragEntered?.call(
+      DropEventDetails(localPosition: Offset.zero, globalPosition: Offset.zero),
+    );
+    await tester.pump();
+    expect(find.byKey(const ValueKey('archive-drop-overlay')), findsOneWidget);
+    target.onDragDone?.call(
+      DropDoneDetails(
+        files: [DropItemFile('/tmp/new.txt')],
+        localPosition: Offset.zero,
+        globalPosition: Offset.zero,
+      ),
+    );
+    await tester.pump();
+    expect(droppedPaths, ['/tmp/new.txt']);
+    expect(droppedDirectory, 'Docs');
+  });
+
+  testWidgets('dragging a selected row exports the whole selection', (
+    tester,
+  ) async {
+    const listing = ArchiveListing(
+      archivePath: '/tmp/example.zip',
+      entries: [
+        ArchiveEntry(path: 'one.txt', isDirectory: false),
+        ArchiveEntry(path: 'two.txt', isDirectory: false),
+      ],
+    );
+    var dragged = <ArchiveEntry>[];
+    await _pumpArchiveScreen(
+      tester,
+      listing,
+      onDragEntries: (entries) async => dragged = entries,
+    );
+    await tester.tap(find.byKey(const ValueKey('archive-selection-toggle')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('全选'));
+    await tester.pumpAndSettle();
+
+    final row = find.byKey(const ValueKey('archive-row-one.txt'));
+    final gesture = await tester.startGesture(
+      tester.getCenter(row),
+      kind: PointerDeviceKind.mouse,
+    );
+    await gesture.moveBy(const Offset(12, 0));
+    await tester.pump();
+    await gesture.up();
+    await tester.pumpAndSettle();
+    expect(dragged.map((entry) => entry.path), ['one.txt', 'two.txt']);
+  });
+
+  testWidgets('internal archive drag is not accepted as an external drop', (
+    tester,
+  ) async {
+    const listing = ArchiveListing(
+      archivePath: '/tmp/example.zip',
+      entries: [ArchiveEntry(path: 'one.txt', isDirectory: false)],
+    );
+    final dragFinished = Completer<void>();
+    var dropCount = 0;
+    await _pumpArchiveScreen(
+      tester,
+      listing,
+      onDropped: (_, _) async => dropCount++,
+      onDragEntries: (_) => dragFinished.future,
+    );
+
+    final row = find.byKey(const ValueKey('archive-row-one.txt'));
+    final gesture = await tester.startGesture(
+      tester.getCenter(row),
+      kind: PointerDeviceKind.mouse,
+    );
+    await gesture.moveBy(const Offset(12, 0));
+    await tester.pump();
+
+    var target = tester.widget<DropTarget>(find.byType(DropTarget));
+    expect(target.enable, isFalse);
+    target.onDragDone?.call(
+      DropDoneDetails(
+        files: [DropItemFile('/tmp/one.txt')],
+        localPosition: Offset.zero,
+        globalPosition: Offset.zero,
+      ),
+    );
+    await tester.pump();
+    expect(dropCount, 0);
+
+    dragFinished.complete();
+    await gesture.up();
+    await tester.pumpAndSettle();
+    target = tester.widget<DropTarget>(find.byType(DropTarget));
+    expect(target.enable, isTrue);
+  });
+
+  testWidgets('archive row uses a drag cursor only after drag detection', (
+    tester,
+  ) async {
+    const listing = ArchiveListing(
+      archivePath: '/tmp/example.zip',
+      entries: [ArchiveEntry(path: 'one.txt', isDirectory: false)],
+    );
+    final dragFinished = Completer<void>();
+    await _pumpArchiveScreen(
+      tester,
+      listing,
+      onDragEntries: (_) => dragFinished.future,
+    );
+    final row = find.byKey(const ValueKey('archive-row-one.txt'));
+    final rowMouseRegion = find.byKey(
+      const ValueKey('archive-row-mouse-one.txt'),
+    );
+    expect(
+      tester.widget<MouseRegion>(rowMouseRegion).cursor,
+      SystemMouseCursors.basic,
+    );
+
+    final gesture = await tester.startGesture(
+      tester.getCenter(row),
+      kind: PointerDeviceKind.mouse,
+    );
+    await gesture.moveBy(const Offset(3, 0));
+    await tester.pump();
+    expect(
+      tester.widget<MouseRegion>(rowMouseRegion).cursor,
+      SystemMouseCursors.basic,
+    );
+    await gesture.moveBy(const Offset(5, 0));
+    await tester.pump();
+    expect(
+      tester.widget<MouseRegion>(rowMouseRegion).cursor,
+      SystemMouseCursors.grab,
+    );
+
+    dragFinished.complete();
+    await gesture.up();
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<MouseRegion>(rowMouseRegion).cursor,
+      SystemMouseCursors.basic,
+    );
+  });
 }
 
 void _expectVerticalOrder(WidgetTester tester, List<String> labels) {
@@ -392,6 +556,8 @@ Future<void> _pumpArchiveScreen(
   ValueChanged<ArchiveEntry>? onDeleteEntry,
   ArchiveEntriesCallback? onExtractEntries,
   ArchiveEntriesCallback? onDeleteEntries,
+  ArchiveDropCallback? onDropped,
+  ArchiveDragCallback? onDragEntries,
 }) async {
   final theme = dark
       ? FTheme.neutral.dark.desktop
@@ -413,6 +579,8 @@ Future<void> _pumpArchiveScreen(
             onDeleteEntry: onDeleteEntry ?? (_) {},
             onExtractEntries: onExtractEntries ?? (_) async => true,
             onDeleteEntries: onDeleteEntries ?? (_) async => true,
+            onDropped: onDropped ?? (_, _) async {},
+            onDragEntries: onDragEntries ?? (_) async {},
           ),
         ),
       ),

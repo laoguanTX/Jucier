@@ -1,6 +1,8 @@
 import 'package:flutter/widgets.dart';
+import 'package:flutter/semantics.dart';
 import 'package:forui/forui.dart';
 import 'package:path/path.dart' as p;
+import 'package:pinyin/pinyin.dart';
 
 import '../archive/archive_entry.dart';
 
@@ -26,11 +28,17 @@ class ArchiveScreen extends StatefulWidget {
 
 class _ArchiveScreenState extends State<ArchiveScreen> {
   String _directory = '';
+  List<double> _columnFractions = const [5 / 12, 2 / 12, 2 / 12, 3 / 12];
+  ArchiveSort? _sort;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.theme.colors;
-    final entries = visibleArchiveEntries(widget.listing.entries, _directory);
+    final entries = visibleArchiveEntries(
+      widget.listing.entries,
+      _directory,
+      sort: _sort,
+    );
 
     return Column(
       children: [
@@ -89,7 +97,13 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
             ],
           ),
         ),
-        _TableHeader(colors: colors),
+        _TableHeader(
+          colors: colors,
+          columnFractions: _columnFractions,
+          sort: _sort,
+          onSort: _cycleSort,
+          onResize: _resizeColumns,
+        ),
         Expanded(
           child: entries.isEmpty
               ? Center(
@@ -101,16 +115,14 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
                   ),
                 )
               : ListView.builder(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 14,
-                    vertical: 8,
-                  ),
+                  padding: const EdgeInsets.fromLTRB(14, 4, 14, 8),
                   itemCount: entries.length + (_directory.isEmpty ? 0 : 1),
                   itemBuilder: (context, index) {
                     if (_directory.isNotEmpty && index == 0) {
                       return _ArchiveRow(
                         name: '..',
                         isDirectory: true,
+                        columnFractions: _columnFractions,
                         onOpen: _goUp,
                       );
                     }
@@ -119,6 +131,7 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
                     return _ArchiveRow(
                       name: entry.name,
                       isDirectory: entry.isDirectory,
+                      columnFractions: _columnFractions,
                       size: entry.size,
                       packedSize: entry.packedSize,
                       modified: entry.modified,
@@ -155,6 +168,42 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
     setState(() {
       final slash = _directory.lastIndexOf('/');
       _directory = slash < 0 ? '' : _directory.substring(0, slash);
+    });
+  }
+
+  void _resizeColumns(int index, double delta, double availableWidth) {
+    if (availableWidth <= 0) return;
+
+    const minimumFractions = [0.20, 0.10, 0.10, 0.16];
+    final pairTotal = _columnFractions[index] + _columnFractions[index + 1];
+    final nextLeft = (_columnFractions[index] + delta / availableWidth)
+        .clamp(minimumFractions[index], pairTotal - minimumFractions[index + 1])
+        .toDouble();
+    if (nextLeft == _columnFractions[index]) return;
+
+    setState(() {
+      final next = List<double>.of(_columnFractions);
+      next[index] = nextLeft;
+      next[index + 1] = pairTotal - nextLeft;
+      _columnFractions = next;
+    });
+  }
+
+  void _cycleSort(ArchiveSortColumn column) {
+    setState(() {
+      if (_sort?.column != column) {
+        _sort = ArchiveSort(
+          column: column,
+          direction: ArchiveSortDirection.ascending,
+        );
+      } else if (_sort!.direction == ArchiveSortDirection.ascending) {
+        _sort = ArchiveSort(
+          column: column,
+          direction: ArchiveSortDirection.descending,
+        );
+      } else {
+        _sort = null;
+      }
     });
   }
 }
@@ -274,30 +323,230 @@ class _BreadcrumbItemState extends State<_BreadcrumbItem> {
 }
 
 class _TableHeader extends StatelessWidget {
-  const _TableHeader({required this.colors});
+  const _TableHeader({
+    required this.colors,
+    required this.columnFractions,
+    required this.sort,
+    required this.onSort,
+    required this.onResize,
+  });
 
   final FColors colors;
+  final List<double> columnFractions;
+  final ArchiveSort? sort;
+  final ValueChanged<ArchiveSortColumn> onSort;
+  final void Function(int index, double delta, double availableWidth) onResize;
 
   @override
-  Widget build(BuildContext context) => Container(
-    height: 36,
-    padding: const EdgeInsets.symmetric(horizontal: 26),
-    color: colors.secondary.withValues(alpha: 0.45),
-    child: const Row(
-      children: [
-        Expanded(flex: 5, child: Text('名称')),
-        Expanded(flex: 2, child: Text('大小')),
-        Expanded(flex: 2, child: Text('压缩后')),
-        Expanded(flex: 3, child: Text('修改时间')),
-      ],
-    ),
-  );
+  Widget build(BuildContext context) {
+    final labelStyle = context.theme.typography.body.xs.copyWith(
+      color: colors.mutedForeground,
+      fontWeight: FontWeight.w600,
+    );
+    final borderColor = colors.brightness == Brightness.dark
+        ? colors.foreground.withValues(alpha: 0.28)
+        : colors.border.withValues(alpha: 0.75);
+    return SizedBox(
+      height: 46,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 6, 14, 4),
+        child: DecoratedBox(
+          key: const ValueKey('archive-table-header-surface'),
+          decoration: BoxDecoration(
+            color: colors.secondary.withValues(alpha: 0.55),
+            border: Border.all(color: borderColor),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                const labels = ['名称', '大小', '压缩后', '修改时间'];
+                const columns = ArchiveSortColumn.values;
+                return Stack(
+                  clipBehavior: Clip.none,
+                  fit: StackFit.expand,
+                  children: [
+                    Row(
+                      children: [
+                        for (var index = 0; index < labels.length; index++)
+                          Expanded(
+                            flex: _columnFlex(columnFractions[index]),
+                            child: Padding(
+                              padding: _columnPadding[index],
+                              child: _SortableHeaderLabel(
+                                key: ValueKey(
+                                  'archive-sort-header-${columns[index].name}',
+                                ),
+                                label: labels[index],
+                                column: columns[index],
+                                direction: sort?.column == columns[index]
+                                    ? sort?.direction
+                                    : null,
+                                colors: colors,
+                                labelStyle: labelStyle,
+                                onSort: onSort,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                    for (var index = 0; index < labels.length - 1; index++)
+                      Positioned(
+                        left:
+                            constraints.maxWidth *
+                                columnFractions
+                                    .take(index + 1)
+                                    .fold(0.0, (sum, value) => sum + value) -
+                            6,
+                        top: 0,
+                        bottom: 0,
+                        width: 12,
+                        child: _ColumnResizeHandle(
+                          key: ValueKey('archive-column-resizer-$index'),
+                          colors: colors,
+                          semanticsLabel: '调整${labels[index]}列宽',
+                          onDrag: (delta) =>
+                              onResize(index, delta, constraints.maxWidth),
+                        ),
+                      ),
+                  ],
+                );
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SortableHeaderLabel extends StatelessWidget {
+  const _SortableHeaderLabel({
+    required this.label,
+    required this.column,
+    required this.direction,
+    required this.colors,
+    required this.labelStyle,
+    required this.onSort,
+    super.key,
+  });
+
+  final String label;
+  final ArchiveSortColumn column;
+  final ArchiveSortDirection? direction;
+  final FColors colors;
+  final TextStyle labelStyle;
+  final ValueChanged<ArchiveSortColumn> onSort;
+
+  @override
+  Widget build(BuildContext context) {
+    final nextAction = switch (direction) {
+      null => '升序排序',
+      ArchiveSortDirection.ascending => '降序排序',
+      ArchiveSortDirection.descending => '恢复默认排序',
+    };
+    return Semantics(
+      button: true,
+      label: '$label，$nextAction',
+      sortKey: OrdinalSortKey(column.index.toDouble()),
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () => onSort(column),
+          child: Align(
+            alignment: _columnAlignment[column.index],
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Flexible(
+                  child: Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: labelStyle,
+                  ),
+                ),
+                if (direction != null) ...[
+                  const SizedBox(width: 4),
+                  Icon(
+                    direction == ArchiveSortDirection.ascending
+                        ? FLucideIcons.chevronUp
+                        : FLucideIcons.chevronDown,
+                    key: ValueKey('archive-sort-indicator-${column.name}'),
+                    size: 13,
+                    color: colors.foreground,
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ColumnResizeHandle extends StatefulWidget {
+  const _ColumnResizeHandle({
+    required this.colors,
+    required this.semanticsLabel,
+    required this.onDrag,
+    super.key,
+  });
+
+  final FColors colors;
+  final String semanticsLabel;
+  final ValueChanged<double> onDrag;
+
+  @override
+  State<_ColumnResizeHandle> createState() => _ColumnResizeHandleState();
+}
+
+class _ColumnResizeHandleState extends State<_ColumnResizeHandle> {
+  bool _hovered = false;
+  bool _dragging = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final highlighted = _hovered || _dragging;
+    return Semantics(
+      label: widget.semanticsLabel,
+      child: MouseRegion(
+        cursor: SystemMouseCursors.resizeColumn,
+        onEnter: (_) => setState(() => _hovered = true),
+        onExit: (_) => setState(() => _hovered = false),
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onHorizontalDragStart: (_) => setState(() => _dragging = true),
+          onHorizontalDragUpdate: (details) => widget.onDrag(details.delta.dx),
+          onHorizontalDragEnd: (_) => setState(() => _dragging = false),
+          onHorizontalDragCancel: () => setState(() => _dragging = false),
+          child: Center(
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 100),
+              width: highlighted ? 2 : 1,
+              height: highlighted ? 24 : 18,
+              decoration: BoxDecoration(
+                color: highlighted
+                    ? widget.colors.primary
+                    : widget.colors.border,
+                borderRadius: BorderRadius.circular(1),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _ArchiveRow extends StatefulWidget {
   const _ArchiveRow({
     required this.name,
     required this.isDirectory,
+    required this.columnFractions,
     this.size,
     this.packedSize,
     this.modified,
@@ -306,6 +555,7 @@ class _ArchiveRow extends StatefulWidget {
 
   final String name;
   final bool isDirectory;
+  final List<double> columnFractions;
   final int? size;
   final int? packedSize;
   final DateTime? modified;
@@ -338,46 +588,76 @@ class _ArchiveRowState extends State<_ArchiveRow> {
           child: Row(
             children: [
               Expanded(
-                flex: 5,
-                child: Row(
-                  children: [
-                    Icon(
-                      widget.isDirectory
-                          ? FLucideIcons.folder
-                          : iconForArchiveEntry(widget.name),
-                      size: 17,
-                      color: widget.isDirectory
-                          ? colors.primary
-                          : colors.mutedForeground,
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        widget.name,
-                        overflow: TextOverflow.ellipsis,
-                        style: textStyle,
+                flex: _columnFlex(widget.columnFractions[0]),
+                child: Padding(
+                  padding: _columnPadding[0],
+                  child: Row(
+                    children: [
+                      Icon(
+                        widget.isDirectory
+                            ? FLucideIcons.folder
+                            : iconForArchiveEntry(widget.name),
+                        size: 17,
+                        color: widget.isDirectory
+                            ? colors.primary
+                            : colors.mutedForeground,
                       ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          widget.name,
+                          overflow: TextOverflow.ellipsis,
+                          style: textStyle,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              Expanded(
+                flex: _columnFlex(widget.columnFractions[1]),
+                child: Padding(
+                  padding: _columnPadding[1],
+                  child: Align(
+                    alignment: _columnAlignment[1],
+                    child: Text(
+                      widget.isDirectory ? '—' : formatBytes(widget.size),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: textStyle,
                     ),
-                  ],
+                  ),
                 ),
               ),
               Expanded(
-                flex: 2,
-                child: Text(
-                  widget.isDirectory ? '—' : formatBytes(widget.size),
-                  style: textStyle,
+                flex: _columnFlex(widget.columnFractions[2]),
+                child: Padding(
+                  padding: _columnPadding[2],
+                  child: Align(
+                    alignment: _columnAlignment[2],
+                    child: Text(
+                      widget.isDirectory ? '—' : formatBytes(widget.packedSize),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: textStyle,
+                    ),
+                  ),
                 ),
               ),
               Expanded(
-                flex: 2,
-                child: Text(
-                  widget.isDirectory ? '—' : formatBytes(widget.packedSize),
-                  style: textStyle,
+                flex: _columnFlex(widget.columnFractions[3]),
+                child: Padding(
+                  padding: _columnPadding[3],
+                  child: Align(
+                    alignment: _columnAlignment[3],
+                    child: Text(
+                      formatDate(widget.modified),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: textStyle,
+                    ),
+                  ),
                 ),
-              ),
-              Expanded(
-                flex: 3,
-                child: Text(formatDate(widget.modified), style: textStyle),
               ),
             ],
           ),
@@ -387,10 +667,38 @@ class _ArchiveRowState extends State<_ArchiveRow> {
   }
 }
 
+const _columnPadding = [
+  EdgeInsets.only(right: 16),
+  EdgeInsets.symmetric(horizontal: 16),
+  EdgeInsets.symmetric(horizontal: 16),
+  EdgeInsets.only(left: 16),
+];
+
+const _columnAlignment = [
+  Alignment.centerLeft,
+  Alignment.centerLeft,
+  Alignment.centerLeft,
+  Alignment.centerLeft,
+];
+
+int _columnFlex(double fraction) => (fraction * 10000).round();
+
+enum ArchiveSortColumn { name, size, packedSize, modified }
+
+enum ArchiveSortDirection { ascending, descending }
+
+class ArchiveSort {
+  const ArchiveSort({required this.column, required this.direction});
+
+  final ArchiveSortColumn column;
+  final ArchiveSortDirection direction;
+}
+
 List<ArchiveEntry> visibleArchiveEntries(
   List<ArchiveEntry> all,
-  String directory,
-) {
+  String directory, {
+  ArchiveSort? sort,
+}) {
   final prefix = directory.isEmpty ? '' : '$directory/';
   final visible = <String, ArchiveEntry>{};
   for (final entry in all) {
@@ -420,10 +728,63 @@ List<ArchiveEntry> visibleArchiveEntries(
       );
     }
   }
-  return visible.values.toList()..sort((a, b) {
-    if (a.isDirectory != b.isDirectory) return a.isDirectory ? -1 : 1;
+  final nameKeys = <String, String>{};
+  int compareNames(ArchiveEntry a, ArchiveEntry b) {
+    final aKey = nameKeys.putIfAbsent(a.name, () => _pinyinSortKey(a.name));
+    final bKey = nameKeys.putIfAbsent(b.name, () => _pinyinSortKey(b.name));
+    final byPinyin = aKey.compareTo(bKey);
+    if (byPinyin != 0) return byPinyin;
     return a.name.toLowerCase().compareTo(b.name.toLowerCase());
-  });
+  }
+
+  int compareDefault(ArchiveEntry a, ArchiveEntry b) {
+    if (a.isDirectory != b.isDirectory) return a.isDirectory ? -1 : 1;
+    return compareNames(a, b);
+  }
+
+  int compareSorted(ArchiveEntry a, ArchiveEntry b) {
+    final primary = switch (sort!.column) {
+      ArchiveSortColumn.name => compareNames(a, b),
+      ArchiveSortColumn.size => _compareNullable(
+        a.size,
+        b.size,
+        (left, right) => left.compareTo(right),
+      ),
+      ArchiveSortColumn.packedSize => _compareNullable(
+        a.packedSize,
+        b.packedSize,
+        (left, right) => left.compareTo(right),
+      ),
+      ArchiveSortColumn.modified => _compareNullable(
+        a.modified,
+        b.modified,
+        (left, right) => left.compareTo(right),
+      ),
+    };
+    final result = primary == 0 ? compareNames(a, b) : primary;
+    return sort.direction == ArchiveSortDirection.ascending ? result : -result;
+  }
+
+  return visible.values.toList()
+    ..sort(sort == null ? compareDefault : compareSorted);
+}
+
+int _compareNullable<T>(
+  T? left,
+  T? right,
+  int Function(T left, T right) compare,
+) {
+  if (left == null) return right == null ? 0 : -1;
+  if (right == null) return 1;
+  return compare(left, right);
+}
+
+String _pinyinSortKey(String value) {
+  try {
+    return PinyinHelper.getPinyin(value, separator: '').toLowerCase();
+  } on PinyinException {
+    return value.toLowerCase();
+  }
 }
 
 IconData iconForArchiveEntry(String name) {

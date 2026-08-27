@@ -24,6 +24,80 @@ void main() {
     },
   );
 
+  test('name sorting uses Chinese pinyin and supports all sort columns', () {
+    final entries = [
+      ArchiveEntry(
+        path: '中目录',
+        isDirectory: true,
+        modified: DateTime(2026, 1, 2),
+      ),
+      ArchiveEntry(
+        path: '阿.txt',
+        isDirectory: false,
+        size: 20,
+        packedSize: 5,
+        modified: DateTime(2026, 1, 3),
+      ),
+      ArchiveEntry(
+        path: '波.txt',
+        isDirectory: false,
+        size: 10,
+        packedSize: 8,
+        modified: DateTime(2026, 1, 1),
+      ),
+    ];
+
+    expect(visibleArchiveEntries(entries, '').map((entry) => entry.name), [
+      '中目录',
+      '阿.txt',
+      '波.txt',
+    ]);
+    expect(
+      visibleArchiveEntries(
+        entries,
+        '',
+        sort: const ArchiveSort(
+          column: ArchiveSortColumn.name,
+          direction: ArchiveSortDirection.ascending,
+        ),
+      ).map((entry) => entry.name),
+      ['阿.txt', '波.txt', '中目录'],
+    );
+    expect(
+      visibleArchiveEntries(
+        entries,
+        '',
+        sort: const ArchiveSort(
+          column: ArchiveSortColumn.size,
+          direction: ArchiveSortDirection.descending,
+        ),
+      ).map((entry) => entry.name),
+      ['阿.txt', '波.txt', '中目录'],
+    );
+    expect(
+      visibleArchiveEntries(
+        entries,
+        '',
+        sort: const ArchiveSort(
+          column: ArchiveSortColumn.packedSize,
+          direction: ArchiveSortDirection.ascending,
+        ),
+      ).map((entry) => entry.name),
+      ['中目录', '阿.txt', '波.txt'],
+    );
+    expect(
+      visibleArchiveEntries(
+        entries,
+        '',
+        sort: const ArchiveSort(
+          column: ArchiveSortColumn.modified,
+          direction: ArchiveSortDirection.ascending,
+        ),
+      ).map((entry) => entry.name),
+      ['波.txt', '中目录', '阿.txt'],
+    );
+  });
+
   test('byte formatting stays compact', () {
     expect(formatBytes(null), '—');
     expect(formatBytes(512), '512 B');
@@ -44,25 +118,7 @@ void main() {
         ),
       ],
     );
-    final theme = FTheme.neutral.light.desktop;
-
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: theme.toApproximateMaterialTheme(),
-        home: FTheme(
-          data: theme,
-          child: Material(
-            child: ArchiveScreen(
-              listing: listing,
-              enabled: true,
-              onClose: () {},
-              onExtract: () {},
-              onTest: () {},
-            ),
-          ),
-        ),
-      ),
-    );
+    await _pumpArchiveScreen(tester, listing);
 
     expect(
       find.byKey(const ValueKey('archive-breadcrumb-root')),
@@ -101,6 +157,111 @@ void main() {
       findsNothing,
     );
   });
+
+  testWidgets('dragging a header divider resizes aligned content columns', (
+    tester,
+  ) async {
+    final listing = ArchiveListing(
+      archivePath: '/tmp/example.zip',
+      entries: [
+        ArchiveEntry(
+          path: 'report.txt',
+          isDirectory: false,
+          size: 42,
+          packedSize: 21,
+          modified: DateTime(2026, 8, 27, 12, 30),
+        ),
+      ],
+    );
+    await _pumpArchiveScreen(tester, listing);
+
+    final sizeHeaderBefore = tester.getTopLeft(find.text('大小')).dx;
+    final sizeValueBefore = tester.getTopLeft(find.text('42 B')).dx;
+    expect(sizeValueBefore, moreOrLessEquals(sizeHeaderBefore));
+    expect(
+      tester.getTopLeft(find.text('21 B')).dx,
+      moreOrLessEquals(tester.getTopLeft(find.text('压缩后')).dx),
+    );
+    expect(
+      tester.getTopLeft(find.text('2026-08-27 12:30')).dx,
+      moreOrLessEquals(tester.getTopLeft(find.text('修改时间')).dx),
+    );
+
+    await tester.drag(
+      find.byKey(const ValueKey('archive-column-resizer-0')),
+      const Offset(40, 0),
+    );
+    await tester.pumpAndSettle();
+
+    final sizeHeaderAfter = tester.getTopLeft(find.text('大小')).dx;
+    final sizeValueAfter = tester.getTopLeft(find.text('42 B')).dx;
+    expect(
+      sizeHeaderAfter - sizeHeaderBefore,
+      moreOrLessEquals(40, epsilon: 0.1),
+    );
+    expect(sizeValueAfter, moreOrLessEquals(sizeHeaderAfter));
+  });
+
+  testWidgets('dark header uses a visible light-gray border', (tester) async {
+    const listing = ArchiveListing(
+      archivePath: '/tmp/example.zip',
+      entries: [],
+    );
+    await _pumpArchiveScreen(tester, listing, dark: true);
+
+    final surface = tester.widget<DecoratedBox>(
+      find.byKey(const ValueKey('archive-table-header-surface')),
+    );
+    final decoration = surface.decoration as BoxDecoration;
+    final border = decoration.border! as Border;
+    final colors = FTheme.neutral.dark.desktop.colors;
+    expect(border.top.color, colors.foreground.withValues(alpha: 0.28));
+  });
+
+  testWidgets('clicking a header cycles ascending, descending, and default', (
+    tester,
+  ) async {
+    const listing = ArchiveListing(
+      archivePath: '/tmp/example.zip',
+      entries: [
+        ArchiveEntry(path: '中目录', isDirectory: true),
+        ArchiveEntry(path: '阿.txt', isDirectory: false),
+        ArchiveEntry(path: '波.txt', isDirectory: false),
+      ],
+    );
+    await _pumpArchiveScreen(tester, listing);
+
+    _expectVerticalOrder(tester, ['中目录', '阿.txt', '波.txt']);
+    expect(
+      find.byKey(const ValueKey('archive-sort-indicator-name')),
+      findsNothing,
+    );
+
+    await tester.tap(find.text('名称'));
+    await tester.pump();
+    _expectVerticalOrder(tester, ['阿.txt', '波.txt', '中目录']);
+    expect(find.byIcon(FLucideIcons.chevronUp), findsOneWidget);
+
+    await tester.tap(find.text('名称'));
+    await tester.pump();
+    _expectVerticalOrder(tester, ['中目录', '波.txt', '阿.txt']);
+    expect(find.byIcon(FLucideIcons.chevronDown), findsOneWidget);
+
+    await tester.tap(find.text('名称'));
+    await tester.pump();
+    _expectVerticalOrder(tester, ['中目录', '阿.txt', '波.txt']);
+    expect(
+      find.byKey(const ValueKey('archive-sort-indicator-name')),
+      findsNothing,
+    );
+  });
+}
+
+void _expectVerticalOrder(WidgetTester tester, List<String> labels) {
+  final positions = labels
+      .map((label) => tester.getTopLeft(find.text(label)).dy)
+      .toList();
+  expect(positions, orderedEquals(positions.toList()..sort()));
 }
 
 Future<void> _doubleTap(WidgetTester tester, Finder finder) async {
@@ -108,4 +269,31 @@ Future<void> _doubleTap(WidgetTester tester, Finder finder) async {
   await tester.pump(const Duration(milliseconds: 50));
   await tester.tap(finder);
   await tester.pumpAndSettle();
+}
+
+Future<void> _pumpArchiveScreen(
+  WidgetTester tester,
+  ArchiveListing listing, {
+  bool dark = false,
+}) async {
+  final theme = dark
+      ? FTheme.neutral.dark.desktop
+      : FTheme.neutral.light.desktop;
+  await tester.pumpWidget(
+    MaterialApp(
+      theme: theme.toApproximateMaterialTheme(),
+      home: FTheme(
+        data: theme,
+        child: Material(
+          child: ArchiveScreen(
+            listing: listing,
+            enabled: true,
+            onClose: () {},
+            onExtract: () {},
+            onTest: () {},
+          ),
+        ),
+      ),
+    ),
+  );
 }

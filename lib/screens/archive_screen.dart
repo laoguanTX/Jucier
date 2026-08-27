@@ -13,6 +13,9 @@ class ArchiveScreen extends StatefulWidget {
     required this.onClose,
     required this.onExtract,
     required this.onTest,
+    required this.onPreviewEntry,
+    required this.onExtractEntry,
+    required this.onDeleteEntry,
     super.key,
   });
 
@@ -21,6 +24,9 @@ class ArchiveScreen extends StatefulWidget {
   final VoidCallback onClose;
   final VoidCallback onExtract;
   final VoidCallback onTest;
+  final ValueChanged<ArchiveEntry> onPreviewEntry;
+  final ValueChanged<ArchiveEntry> onExtractEntry;
+  final ValueChanged<ArchiveEntry> onDeleteEntry;
 
   @override
   State<ArchiveScreen> createState() => _ArchiveScreenState();
@@ -141,7 +147,9 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
                                   ? entry.name
                                   : '$_directory/${entry.name}';
                             })
-                          : null,
+                          : () => widget.onPreviewEntry(entry),
+                      onExtract: () => widget.onExtractEntry(entry),
+                      onDelete: () => widget.onDeleteEntry(entry),
                     );
                   },
                 ),
@@ -551,6 +559,8 @@ class _ArchiveRow extends StatefulWidget {
     this.packedSize,
     this.modified,
     this.onOpen,
+    this.onExtract,
+    this.onDelete,
   });
 
   final String name;
@@ -560,6 +570,8 @@ class _ArchiveRow extends StatefulWidget {
   final int? packedSize;
   final DateTime? modified;
   final VoidCallback? onOpen;
+  final VoidCallback? onExtract;
+  final VoidCallback? onDelete;
 
   @override
   State<_ArchiveRow> createState() => _ArchiveRowState();
@@ -572,13 +584,14 @@ class _ArchiveRowState extends State<_ArchiveRow> {
   Widget build(BuildContext context) {
     final colors = context.theme.colors;
     final textStyle = context.theme.typography.body.sm;
-    return MouseRegion(
+    final row = MouseRegion(
       onEnter: (_) => setState(() => _hovered = true),
       onExit: (_) => setState(() => _hovered = false),
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onDoubleTap: widget.onOpen,
         child: Container(
+          key: ValueKey('archive-row-${widget.name}'),
           height: 42,
           padding: const EdgeInsets.symmetric(horizontal: 12),
           decoration: BoxDecoration(
@@ -664,6 +677,40 @@ class _ArchiveRowState extends State<_ArchiveRow> {
         ),
       ),
     );
+    if (widget.onExtract == null && widget.onDelete == null) return row;
+
+    return FContextMenu(
+      semanticsLabel: '${widget.name} 操作菜单',
+      secondaryPress: true,
+      longPress: false,
+      menuBuilder: (context, controller, _) => [
+        FItemGroup(
+          divider: FItemDivider.full,
+          children: [
+            FItem(
+              key: ValueKey('archive-context-extract-${widget.name}'),
+              prefix: const Icon(FLucideIcons.archiveRestore, size: 16),
+              title: Text(widget.isDirectory ? '解压该文件夹' : '解压该文件'),
+              onPress: () {
+                controller.hide();
+                widget.onExtract?.call();
+              },
+            ),
+            FItem(
+              key: ValueKey('archive-context-delete-${widget.name}'),
+              variant: FItemVariant.destructive,
+              prefix: const Icon(FLucideIcons.trash2, size: 16),
+              title: Text(widget.isDirectory ? '删除压缩包内文件夹' : '删除压缩包内文件'),
+              onPress: () {
+                controller.hide();
+                widget.onDelete?.call();
+              },
+            ),
+          ],
+        ),
+      ],
+      child: row,
+    );
   }
 }
 
@@ -717,7 +764,7 @@ List<ArchiveEntry> visibleArchiveEntries(
       );
     } else {
       visible[relative] = ArchiveEntry(
-        path: relative,
+        path: normalized,
         isDirectory: entry.isDirectory,
         size: entry.size,
         packedSize: entry.packedSize,

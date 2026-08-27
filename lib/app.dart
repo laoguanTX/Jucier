@@ -5,6 +5,7 @@ import 'application/jucier_shell.dart';
 import 'archive/archive_engine.dart';
 import 'archive/seven_zip_engine.dart';
 import 'platform/file_access_service.dart';
+import 'platform/single_entry_extraction_preference_store.dart';
 import 'platform/theme_preference_store.dart';
 
 export 'application/jucier_shell.dart' show JucierShell;
@@ -16,11 +17,14 @@ class JucierApp extends StatefulWidget {
     this.engine,
     this.fileAccessService,
     this.themePreferenceStore,
+    this.singleEntryExtractionPreferenceStore,
   });
 
   final ArchiveEngine? engine;
   final FileAccessService? fileAccessService;
   final ThemePreferenceStore? themePreferenceStore;
+  final SingleEntryExtractionPreferenceStore?
+  singleEntryExtractionPreferenceStore;
 
   @override
   State<JucierApp> createState() => _JucierAppState();
@@ -30,8 +34,13 @@ class _JucierAppState extends State<JucierApp> {
   late final ArchiveEngine _engine;
   late final FileAccessService _fileAccessService;
   late final ThemePreferenceStore _themePreferenceStore;
+  late final SingleEntryExtractionPreferenceStore
+  _singleEntryExtractionPreferenceStore;
   ThemeMode _themeMode = ThemeMode.system;
+  SingleEntryExtractionMode _singleEntryExtractionMode =
+      SingleEntryExtractionMode.preserveArchiveStructure;
   bool _themeChangedByUser = false;
+  bool _singleEntryExtractionModeChangedByUser = false;
 
   @override
   void initState() {
@@ -40,7 +49,11 @@ class _JucierAppState extends State<JucierApp> {
     _fileAccessService = widget.fileAccessService ?? MacOSFileAccessService();
     _themePreferenceStore =
         widget.themePreferenceStore ?? MacOSThemePreferenceStore();
+    _singleEntryExtractionPreferenceStore =
+        widget.singleEntryExtractionPreferenceStore ??
+        MacOSSingleEntryExtractionPreferenceStore();
     _loadThemeMode();
+    _loadSingleEntryExtractionMode();
   }
 
   Future<void> _loadThemeMode() async {
@@ -55,6 +68,20 @@ class _JucierAppState extends State<JucierApp> {
     _themeChangedByUser = true;
     setState(() => _themeMode = mode);
     _themePreferenceStore.save(mode);
+  }
+
+  Future<void> _loadSingleEntryExtractionMode() async {
+    final mode = await _singleEntryExtractionPreferenceStore.load();
+    if (mounted && !_singleEntryExtractionModeChangedByUser) {
+      setState(() => _singleEntryExtractionMode = mode);
+    }
+  }
+
+  void _setSingleEntryExtractionMode(SingleEntryExtractionMode mode) {
+    if (_singleEntryExtractionMode == mode) return;
+    _singleEntryExtractionModeChangedByUser = true;
+    setState(() => _singleEntryExtractionMode = mode);
+    _singleEntryExtractionPreferenceStore.save(mode);
   }
 
   @override
@@ -92,6 +119,8 @@ class _JucierAppState extends State<JucierApp> {
         fileAccessService: _fileAccessService,
         themeMode: _themeMode,
         onThemeModeChanged: _setThemeMode,
+        singleEntryExtractionMode: _singleEntryExtractionMode,
+        onSingleEntryExtractionModeChanged: _setSingleEntryExtractionMode,
       ),
     );
   }

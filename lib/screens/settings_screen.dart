@@ -3,6 +3,7 @@ import 'package:forui/forui.dart';
 import 'package:material_ui/material_ui.dart' show ThemeMode;
 
 import '../platform/file_access_service.dart';
+import '../platform/single_entry_extraction_preference_store.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({
@@ -10,12 +11,18 @@ class SettingsScreen extends StatefulWidget {
     required this.themeMode,
     required this.onBack,
     this.onThemeModeChanged,
+    this.singleEntryExtractionMode =
+        SingleEntryExtractionMode.preserveArchiveStructure,
+    this.onSingleEntryExtractionModeChanged,
     super.key,
   });
 
   final FileAccessService fileAccessService;
   final ThemeMode themeMode;
   final ValueChanged<ThemeMode>? onThemeModeChanged;
+  final SingleEntryExtractionMode singleEntryExtractionMode;
+  final ValueChanged<SingleEntryExtractionMode>?
+  onSingleEntryExtractionModeChanged;
   final VoidCallback onBack;
 
   @override
@@ -115,6 +122,40 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             icon: FLucideIcons.moon,
                             selectedMode: widget.themeMode,
                             onChanged: widget.onThemeModeChanged,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  _SettingsCard(
+                    key: const ValueKey('settings-single-entry-card'),
+                    icon: FLucideIcons.fileArchive,
+                    title: '单文件解压/预览模式',
+                    description:
+                        widget.singleEntryExtractionMode ==
+                            SingleEntryExtractionMode.preserveArchiveStructure
+                        ? '单独解压时保留压缩包中的完整父目录。'
+                        : '仅解压所选文件或文件夹，不包含其父目录。',
+                    trailing: SizedBox(
+                      width: 244,
+                      child: Row(
+                        children: [
+                          _ExtractionModeButton(
+                            mode: SingleEntryExtractionMode
+                                .preserveArchiveStructure,
+                            label: '保留目录结构',
+                            selectedMode: widget.singleEntryExtractionMode,
+                            onChanged:
+                                widget.onSingleEntryExtractionModeChanged,
+                          ),
+                          const SizedBox(width: 6),
+                          _ExtractionModeButton(
+                            mode: SingleEntryExtractionMode.selectedOnly,
+                            label: '不含父目录',
+                            selectedMode: widget.singleEntryExtractionMode,
+                            onChanged:
+                                widget.onSingleEntryExtractionModeChanged,
                           ),
                         ],
                       ),
@@ -248,6 +289,33 @@ class _ThemeModeButton extends StatelessWidget {
           : FButtonVariant.outline,
       onPress: onChanged == null ? null : () => onChanged!(mode),
       prefix: Icon(icon, size: 15),
+      child: Text(label),
+    ),
+  );
+}
+
+class _ExtractionModeButton extends StatelessWidget {
+  const _ExtractionModeButton({
+    required this.mode,
+    required this.label,
+    required this.selectedMode,
+    required this.onChanged,
+  });
+
+  final SingleEntryExtractionMode mode;
+  final String label;
+  final SingleEntryExtractionMode selectedMode;
+  final ValueChanged<SingleEntryExtractionMode>? onChanged;
+
+  @override
+  Widget build(BuildContext context) => Expanded(
+    child: FButton(
+      key: ValueKey('single-entry-mode-${mode.name}'),
+      size: FButtonSizeVariant.sm,
+      variant: mode == selectedMode
+          ? FButtonVariant.primary
+          : FButtonVariant.outline,
+      onPress: onChanged == null ? null : () => onChanged!(mode),
       child: Text(label),
     ),
   );

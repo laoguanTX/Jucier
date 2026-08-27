@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter/gestures.dart';
 import 'package:forui/forui.dart';
 import 'package:jucier/archive/archive_entry.dart';
 import 'package:jucier/screens/archive_screen.dart';
@@ -255,6 +256,65 @@ void main() {
       findsNothing,
     );
   });
+
+  testWidgets('double-click previews a file with its complete archive path', (
+    tester,
+  ) async {
+    const listing = ArchiveListing(
+      archivePath: '/tmp/example.zip',
+      entries: [
+        ArchiveEntry(path: 'Docs/readme.txt', isDirectory: false, size: 12),
+      ],
+    );
+    ArchiveEntry? previewed;
+    await _pumpArchiveScreen(
+      tester,
+      listing,
+      onPreviewEntry: (entry) => previewed = entry,
+    );
+
+    await _doubleTap(tester, find.text('Docs'));
+    await _doubleTap(tester, find.text('readme.txt'));
+    expect(previewed?.path, 'Docs/readme.txt');
+  });
+
+  testWidgets('right-click menu extracts and deletes an archive entry', (
+    tester,
+  ) async {
+    const listing = ArchiveListing(
+      archivePath: '/tmp/example.zip',
+      entries: [ArchiveEntry(path: 'report.txt', isDirectory: false, size: 12)],
+    );
+    ArchiveEntry? extracted;
+    ArchiveEntry? deleted;
+    await _pumpArchiveScreen(
+      tester,
+      listing,
+      onExtractEntry: (entry) => extracted = entry,
+      onDeleteEntry: (entry) => deleted = entry,
+    );
+
+    await tester.tap(
+      find.byKey(const ValueKey('archive-row-report.txt')),
+      buttons: kSecondaryMouseButton,
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('解压该文件'), findsOneWidget);
+    expect(find.text('删除压缩包内文件'), findsOneWidget);
+
+    await tester.tap(find.text('解压该文件'));
+    await tester.pumpAndSettle();
+    expect(extracted?.path, 'report.txt');
+
+    await tester.tap(
+      find.byKey(const ValueKey('archive-row-report.txt')),
+      buttons: kSecondaryMouseButton,
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('删除压缩包内文件'));
+    await tester.pumpAndSettle();
+    expect(deleted?.path, 'report.txt');
+  });
 }
 
 void _expectVerticalOrder(WidgetTester tester, List<String> labels) {
@@ -275,6 +335,9 @@ Future<void> _pumpArchiveScreen(
   WidgetTester tester,
   ArchiveListing listing, {
   bool dark = false,
+  ValueChanged<ArchiveEntry>? onPreviewEntry,
+  ValueChanged<ArchiveEntry>? onExtractEntry,
+  ValueChanged<ArchiveEntry>? onDeleteEntry,
 }) async {
   final theme = dark
       ? FTheme.neutral.dark.desktop
@@ -291,6 +354,9 @@ Future<void> _pumpArchiveScreen(
             onClose: () {},
             onExtract: () {},
             onTest: () {},
+            onPreviewEntry: onPreviewEntry ?? (_) {},
+            onExtractEntry: onExtractEntry ?? (_) {},
+            onDeleteEntry: onDeleteEntry ?? (_) {},
           ),
         ),
       ),

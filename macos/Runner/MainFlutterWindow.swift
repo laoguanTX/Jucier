@@ -7,6 +7,7 @@ class MainFlutterWindow: NSWindow {
   private let bookmarkPathKey = "fileAccessBookmarkPath"
   private let permissionRequestedKey = "fileAccessPermissionRequested"
   private let themeModeKey = "themeMode"
+  private let singleEntryExtractionModeKey = "singleEntryExtractionMode"
   private var scopedURL: URL?
 
   override func awakeFromNib() {
@@ -49,14 +50,58 @@ class MainFlutterWindow: NSWindow {
         result(self.storedThemeMode())
       case "setThemeMode":
         self.setThemeMode(call.arguments, result: result)
+      case "openFile":
+        self.openFile(call.arguments, result: result)
+      case "singleEntryExtractionMode":
+        result(self.storedSingleEntryExtractionMode())
+      case "setSingleEntryExtractionMode":
+        self.setSingleEntryExtractionMode(call.arguments, result: result)
       default:
         result(FlutterMethodNotImplemented)
       }
     }
   }
 
+  private func openFile(_ value: Any?, result: FlutterResult) {
+    guard let path = value as? String, !path.isEmpty else {
+      result(FlutterError(
+        code: "invalid_file_path",
+        message: "预览文件路径无效",
+        details: value))
+      return
+    }
+
+    if NSWorkspace.shared.open(URL(fileURLWithPath: path)) {
+      result(nil)
+    } else {
+      result(FlutterError(
+        code: "open_file_failed",
+        message: "没有可用于打开该文件的应用",
+        details: path))
+    }
+  }
+
   private func storedThemeMode() -> String {
     UserDefaults.standard.string(forKey: themeModeKey) ?? "system"
+  }
+
+  private func storedSingleEntryExtractionMode() -> String {
+    UserDefaults.standard.string(forKey: singleEntryExtractionModeKey)
+      ?? "preserveArchiveStructure"
+  }
+
+  private func setSingleEntryExtractionMode(_ value: Any?, result: FlutterResult) {
+    guard let mode = value as? String,
+      ["preserveArchiveStructure", "selectedOnly"].contains(mode) else {
+      result(FlutterError(
+        code: "invalid_single_entry_extraction_mode",
+        message: "不支持的单文件解压模式",
+        details: value))
+      return
+    }
+
+    UserDefaults.standard.set(mode, forKey: singleEntryExtractionModeKey)
+    result(nil)
   }
 
   private func setThemeMode(_ value: Any?, result: FlutterResult) {

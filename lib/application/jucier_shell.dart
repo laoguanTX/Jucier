@@ -1,17 +1,25 @@
+import 'dart:async';
+
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:forui/forui.dart';
 import 'package:material_ui/material_ui.dart' show ThemeMode;
+import 'package:path/path.dart' as p;
 
 import '../archive/archive_engine.dart';
+import '../archive/archive_entry.dart';
 import '../archive/archive_formats.dart';
+import '../archive/archive_options.dart';
+import '../dialogs/confirmation_dialog.dart';
 import '../dialogs/create_archive_dialog.dart';
 import '../dialogs/extract_dialog.dart';
 import '../dialogs/message_dialog.dart';
 import '../dialogs/password_dialog.dart';
 import '../platform/file_access_service.dart';
+import '../platform/file_preview_service.dart';
+import '../platform/single_entry_extraction_preference_store.dart';
 import '../screens/archive_screen.dart';
 import '../screens/home_screen.dart';
 import '../screens/settings_screen.dart';
@@ -31,6 +39,10 @@ class JucierShell extends StatefulWidget {
     required this.fileAccessService,
     this.themeMode = ThemeMode.system,
     this.onThemeModeChanged,
+    this.fileLauncher,
+    this.singleEntryExtractionMode =
+        SingleEntryExtractionMode.preserveArchiveStructure,
+    this.onSingleEntryExtractionModeChanged,
     super.key,
   });
 
@@ -38,6 +50,10 @@ class JucierShell extends StatefulWidget {
   final FileAccessService fileAccessService;
   final ThemeMode themeMode;
   final ValueChanged<ThemeMode>? onThemeModeChanged;
+  final FileLauncher? fileLauncher;
+  final SingleEntryExtractionMode singleEntryExtractionMode;
+  final ValueChanged<SingleEntryExtractionMode>?
+  onSingleEntryExtractionModeChanged;
 
   @override
   State<JucierShell> createState() => _JucierShellState();
@@ -45,12 +61,18 @@ class JucierShell extends StatefulWidget {
 
 class _JucierShellState extends State<JucierShell> {
   late final ArchiveWorkflowController _workflow;
+  late final FilePreviewService _previews;
+  Future<void> _previewPromptQueue = Future.value();
   bool _settingsOpen = false;
 
   @override
   void initState() {
     super.initState();
     _workflow = ArchiveWorkflowController(widget.engine);
+    _previews = FilePreviewService(
+      launcher: widget.fileLauncher ?? MacOSFileLauncher(),
+      onChanged: _handlePreviewChanged,
+    );
     widget.fileAccessService.setOpenSettingsHandler(_openSettings);
     WidgetsBinding.instance.addPostFrameCallback(
       (_) => _requestInitialAccess(),
@@ -60,6 +82,7 @@ class _JucierShellState extends State<JucierShell> {
   @override
   void dispose() {
     widget.fileAccessService.setOpenSettingsHandler(null);
+    unawaited(_previews.dispose());
     _workflow.dispose();
     super.dispose();
   }
@@ -112,6 +135,9 @@ class _JucierShellState extends State<JucierShell> {
         fileAccessService: widget.fileAccessService,
         themeMode: widget.themeMode,
         onThemeModeChanged: widget.onThemeModeChanged,
+        singleEntryExtractionMode: widget.singleEntryExtractionMode,
+        onSingleEntryExtractionModeChanged:
+            widget.onSingleEntryExtractionModeChanged,
         onBack: () => setState(() => _settingsOpen = false),
       );
     }
@@ -132,6 +158,9 @@ class _JucierShellState extends State<JucierShell> {
       onClose: _workflow.closeArchive,
       onExtract: _extractCurrentArchive,
       onTest: _testCurrentArchive,
+      onPreviewEntry: _previewEntry,
+      onExtractEntry: _extractEntry,
+      onDeleteEntry: _deleteEntry,
     );
   }
 
@@ -270,6 +299,163 @@ class _JucierShellState extends State<JucierShell> {
         await showMessageDialog(context, title: '测试失败', message: error.message);
       }
     }
+  }
+
+  Future<void> _previewEntry(ArchiveEntry entry) async {
+    final listing = _workflow.listing;
+    if (listing == null || entry.isDirectory || _workflow.busy) return;
+    try {
+      await _previews.open(
+        archivePath: listing.archivePath,
+        entryPath: entry.path,
+        password: _workflow.password,
+        preserveArchiveStructure:
+            widget.singleEntryExtractionMode ==
+            SingleEntryExtractionMode.preserveArchiveStructure,
+        extract: (outputDirectory) => _workflow.extractEntries(
+          ExtractEntriesOptions(
+            archivePath: listing.archivePath,
+            entryPaths: [entry.path],
+            outputDirectory: outputDirectory,
+            password: _workflow.password,
+            withoutParentDirectories:
+                widget.singleEntryExtractionMode ==
+                SingleEntryExtractionMode.selectedOnly,
+            selectedEntryPath: entry.path,
+          ),
+        ),
+      );
+    } on ArchivePasswordRequiredException {
+      if (mounted) {
+        await showMessageDialog(context, title: '无法预览', message: '压缩包密码不正确。');
+      }
+    } on ArchiveCancelledException {
+      // Explicit cancellations do not need an error dialog.
+    } on ArchiveException catch (error) {
+      if (mounted) {
+        await showMessageDialog(context, title: '无法预览', message: error.message);
+      }
+    }
+  }
+
+  Future<void> _extractEntry(ArchiveEntry entry) async {
+    final listing = _workflow.listing;
+    if (listing == null || _workflow.busy) return;
+    final outputDirectory = await getDirectoryPath(confirmButtonText: '解压到这里');
+    if (outputDirectory == null || !mounted) return;
+
+    final paths = _pathsForEntry(listing, entry);
+    try {
+      await _workflow.extractEntries(
+        ExtractEntriesOptions(
+          archivePath: listing.archivePath,
+          entryPaths: paths,
+          outputDirectory: outputDirectory,
+          password: _workflow.password,
+          withoutParentDirectories:
+              widget.singleEntryExtractionMode ==
+              SingleEntryExtractionMode.selectedOnly,
+          selectedEntryPath: entry.path,
+        ),
+      );
+      if (mounted) {
+        await showMessageDialog(
+          context,
+          title: '解压完成',
+          message: '${entry.name} 已保存到 $outputDirectory',
+        );
+      }
+    } on ArchiveCancelledException {
+      // Explicit cancellations do not need an error dialog.
+    } on ArchiveException catch (error) {
+      if (mounted) {
+        await showMessageDialog(context, title: '解压失败', message: error.message);
+      }
+    }
+  }
+
+  Future<void> _deleteEntry(ArchiveEntry entry) async {
+    final listing = _workflow.listing;
+    if (listing == null || _workflow.busy) return;
+    final confirmed = await showConfirmationDialog(
+      context,
+      title: '从压缩包中删除？',
+      message: '“${entry.name}”将从 ${p.basename(listing.archivePath)} 中永久删除。',
+      confirmLabel: '删除',
+      destructive: true,
+    );
+    if (!confirmed || !mounted) return;
+
+    try {
+      await _workflow.deleteEntries(_pathsForEntry(listing, entry));
+    } on ArchiveCancelledException {
+      // Explicit cancellations do not need an error dialog.
+    } on ArchiveException catch (error) {
+      if (mounted) {
+        await showMessageDialog(context, title: '删除失败', message: error.message);
+      }
+    }
+  }
+
+  Future<void> _handlePreviewChanged(PreviewSession session) async {
+    final queued = _previewPromptQueue.then(
+      (_) => _processPreviewChange(session),
+    );
+    _previewPromptQueue = queued.onError((_, _) {});
+    await queued;
+  }
+
+  Future<void> _processPreviewChange(PreviewSession session) async {
+    if (!mounted) return;
+    final apply = await showConfirmationDialog(
+      context,
+      title: '预览文件已修改',
+      message:
+          '是否将对“${p.basename(session.entryPath)}”的修改应用到 ${p.basename(session.archivePath)}？',
+      confirmLabel: '应用修改',
+      cancelLabel: '暂不应用',
+    );
+    if (!apply || !mounted) return;
+
+    await _workflow.waitUntilIdle();
+    if (!mounted) return;
+
+    try {
+      await _workflow.updateEntry(
+        archivePath: session.archivePath,
+        entryPath: session.entryPath,
+        sourcePath: session.filePath,
+        password: session.password,
+      );
+      if (mounted) {
+        await showMessageDialog(
+          context,
+          title: '修改已应用',
+          message: '${p.basename(session.entryPath)} 已更新到压缩包。',
+        );
+      }
+    } on ArchiveException catch (error) {
+      if (mounted) {
+        await showMessageDialog(
+          context,
+          title: '无法应用修改',
+          message: error.message,
+        );
+      }
+    }
+  }
+
+  List<String> _pathsForEntry(ArchiveListing listing, ArchiveEntry entry) {
+    final path = entry.path
+        .replaceAll('\\', '/')
+        .replaceAll(RegExp(r'/+$'), '');
+    if (!entry.isDirectory) return [path];
+    final prefix = '$path/';
+    final descendants = listing.entries
+        .map((candidate) => candidate.path.replaceAll('\\', '/'))
+        .where((candidate) => candidate == path || candidate.startsWith(prefix))
+        .toList();
+    return descendants.isEmpty ? [path] : descendants;
   }
 }
 

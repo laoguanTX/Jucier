@@ -4,6 +4,7 @@ import 'package:forui/forui.dart';
 import 'package:jucier/app.dart';
 import 'package:jucier/archive/archive_engine.dart';
 import 'package:jucier/platform/file_access_service.dart';
+import 'package:jucier/platform/single_entry_extraction_preference_store.dart';
 import 'package:jucier/platform/theme_preference_store.dart';
 import 'package:material_ui/material_ui.dart';
 
@@ -155,6 +156,50 @@ void main() {
       FButtonVariant.primary,
     );
   });
+
+  testWidgets('loads, switches, and persists the single-entry mode', (
+    tester,
+  ) async {
+    final extractionPreferences = _FakeSingleEntryExtractionPreferenceStore(
+      SingleEntryExtractionMode.selectedOnly,
+    );
+    final permissions = _FakeFileAccessService(
+      initialStatus: const FileAccessStatus(requested: true, granted: true),
+    );
+
+    await tester.pumpWidget(
+      JucierApp(
+        engine: _UnusedArchiveEngine(),
+        fileAccessService: permissions,
+        themePreferenceStore: _FakeThemePreferenceStore(),
+        singleEntryExtractionPreferenceStore: extractionPreferences,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('设置'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('单文件解压/预览模式'), findsOneWidget);
+    expect(find.text('仅解压所选文件或文件夹，不包含其父目录。'), findsOneWidget);
+    expect(
+      tester
+          .widget<FButton>(
+            find.byKey(const ValueKey('single-entry-mode-selectedOnly')),
+          )
+          .variant,
+      FButtonVariant.primary,
+    );
+
+    await tester.tap(
+      find.byKey(const ValueKey('single-entry-mode-preserveArchiveStructure')),
+    );
+    await tester.pumpAndSettle();
+
+    expect(extractionPreferences.savedModes, [
+      SingleEntryExtractionMode.preserveArchiveStructure,
+    ]);
+    expect(find.text('单独解压时保留压缩包中的完整父目录。'), findsOneWidget);
+  });
 }
 
 class _FakeFileAccessService implements FileAccessService {
@@ -204,6 +249,23 @@ class _FakeThemePreferenceStore implements ThemePreferenceStore {
 
   @override
   Future<void> save(ThemeMode mode) async {
+    this.mode = mode;
+    savedModes.add(mode);
+  }
+}
+
+class _FakeSingleEntryExtractionPreferenceStore
+    implements SingleEntryExtractionPreferenceStore {
+  _FakeSingleEntryExtractionPreferenceStore(this.mode);
+
+  SingleEntryExtractionMode mode;
+  final List<SingleEntryExtractionMode> savedModes = [];
+
+  @override
+  Future<SingleEntryExtractionMode> load() async => mode;
+
+  @override
+  Future<void> save(SingleEntryExtractionMode mode) async {
     this.mode = mode;
     savedModes.add(mode);
   }

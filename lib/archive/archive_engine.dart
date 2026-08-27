@@ -18,6 +18,26 @@ abstract interface class ArchiveEngine {
     ProgressCallback? onProgress,
   });
 
+  Future<void> extractEntries(
+    ExtractEntriesOptions options, {
+    ProgressCallback? onProgress,
+  });
+
+  Future<void> updateEntry({
+    required String archivePath,
+    required String entryPath,
+    required String sourcePath,
+    String? password,
+    ProgressCallback? onProgress,
+  });
+
+  Future<void> deleteEntries({
+    required String archivePath,
+    required List<String> entryPaths,
+    String? password,
+    ProgressCallback? onProgress,
+  });
+
   Future<void> test(
     String archivePath, {
     String? password,

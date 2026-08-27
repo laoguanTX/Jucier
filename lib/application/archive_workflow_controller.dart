@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 
@@ -20,6 +22,7 @@ class ArchiveWorkflowController extends ChangeNotifier {
   String? _operationLabel;
   double? _progress;
   bool _disposed = false;
+  final List<Completer<void>> _idleWaiters = [];
 
   ArchiveListing? get listing => _listing;
   String? get password => _password;
@@ -56,6 +59,53 @@ class ArchiveWorkflowController extends ChangeNotifier {
     }
   }
 
+  Future<void> extractEntries(ExtractEntriesOptions options) async {
+    _beginOperation('正在解压所选文件', progress: 0);
+    try {
+      await _engine.extractEntries(options, onProgress: _updateProgress);
+    } finally {
+      _endOperation();
+    }
+  }
+
+  Future<void> updateEntry({
+    required String archivePath,
+    required String entryPath,
+    required String sourcePath,
+    String? password,
+  }) async {
+    _beginOperation('正在更新 ${p.basename(entryPath)}', progress: 0);
+    try {
+      await _engine.updateEntry(
+        archivePath: archivePath,
+        entryPath: entryPath,
+        sourcePath: sourcePath,
+        password: password,
+        onProgress: _updateProgress,
+      );
+      await _refreshIfCurrent(archivePath);
+    } finally {
+      _endOperation();
+    }
+  }
+
+  Future<void> deleteEntries(List<String> entryPaths) async {
+    final current = _listing;
+    if (current == null) return;
+    _beginOperation('正在从压缩包删除文件', progress: 0);
+    try {
+      await _engine.deleteEntries(
+        archivePath: current.archivePath,
+        entryPaths: entryPaths,
+        password: _password,
+        onProgress: _updateProgress,
+      );
+      await _refreshIfCurrent(current.archivePath);
+    } finally {
+      _endOperation();
+    }
+  }
+
   Future<void> testCurrent() async {
     final current = _listing;
     if (current == null) return;
@@ -80,9 +130,26 @@ class ArchiveWorkflowController extends ChangeNotifier {
 
   Future<void> cancel() => _engine.cancel();
 
+  Future<void> waitUntilIdle() {
+    if (!busy) return Future.value();
+    final waiter = Completer<void>();
+    _idleWaiters.add(waiter);
+    return waiter.future;
+  }
+
+  Future<void> _refreshIfCurrent(String archivePath) async {
+    if (_listing?.archivePath != archivePath) return;
+    _listing = await _engine.list(archivePath, password: _password);
+    _notifyListeners();
+  }
+
   @override
   void dispose() {
     _disposed = true;
+    for (final waiter in _idleWaiters) {
+      if (!waiter.isCompleted) waiter.complete();
+    }
+    _idleWaiters.clear();
     super.dispose();
   }
 
@@ -101,6 +168,10 @@ class ArchiveWorkflowController extends ChangeNotifier {
     _operationLabel = null;
     _progress = null;
     _notifyListeners();
+    for (final waiter in _idleWaiters) {
+      if (!waiter.isCompleted) waiter.complete();
+    }
+    _idleWaiters.clear();
   }
 
   void _notifyListeners() {

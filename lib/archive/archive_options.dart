@@ -59,3 +59,23 @@ class ExtractArchiveOptions {
   final String? password;
   final ExtractionConflict conflict;
 }
+
+class ExtractEntriesOptions {
+  const ExtractEntriesOptions({
+    required this.archivePath,
+    required this.entryPaths,
+    required this.outputDirectory,
+    this.password,
+    this.conflict = ExtractionConflict.overwrite,
+    this.withoutParentDirectories = false,
+    this.selectedEntryPath,
+  });
+
+  final String archivePath;
+  final List<String> entryPaths;
+  final String outputDirectory;
+  final String? password;
+  final ExtractionConflict conflict;
+  final bool withoutParentDirectories;
+  final String? selectedEntryPath;
+}

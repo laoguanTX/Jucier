@@ -42,6 +42,25 @@ void main() {
       expect(controller.password, isNull);
     },
   );
+
+  test('can create directly without opening the new archive', () async {
+    final engine = _ImmediateArchiveEngine();
+    final controller = ArchiveWorkflowController(engine);
+
+    await controller.create(
+      const CreateArchiveOptions(
+        archivePath: '/tmp/output.zip',
+        sources: ['/tmp/input'],
+        format: ArchiveFormat.zip,
+      ),
+      openAfterCreate: false,
+    );
+
+    expect(engine.createCalls, 1);
+    expect(engine.listCalls, 0);
+    expect(controller.listing, isNull);
+    expect(controller.busy, isFalse);
+  });
 }
 
 class _FakeArchiveEngine implements ArchiveEngine {
@@ -60,6 +79,28 @@ class _FakeArchiveEngine implements ArchiveEngine {
   }) {
     onProgress?.call(0.4);
     return _createCompleter.future;
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+class _ImmediateArchiveEngine implements ArchiveEngine {
+  int createCalls = 0;
+  int listCalls = 0;
+
+  @override
+  Future<void> create(
+    CreateArchiveOptions options, {
+    ProgressCallback? onProgress,
+  }) async {
+    createCalls++;
+  }
+
+  @override
+  Future<ArchiveListing> list(String archivePath, {String? password}) async {
+    listCalls++;
+    return ArchiveListing(archivePath: archivePath, entries: const []);
   }
 
   @override

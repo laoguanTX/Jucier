@@ -41,16 +41,21 @@ class ArchiveWorkflowController extends ChangeNotifier {
     }
   }
 
-  Future<void> create(CreateArchiveOptions options) async {
+  Future<void> create(
+    CreateArchiveOptions options, {
+    bool openAfterCreate = true,
+  }) async {
     _beginOperation('正在创建 ${p.basename(options.archivePath)}', progress: 0);
     try {
       await _engine.create(options, onProgress: _updateProgress);
-      final listingPath = options.volumeSize?.isNotEmpty == true
-          ? '${options.archivePath}.001'
-          : options.archivePath;
-      _listing = await _engine.list(listingPath, password: options.password);
-      _password = options.password;
-      _notifyListeners();
+      if (openAfterCreate) {
+        final listingPath = options.volumeSize?.isNotEmpty == true
+            ? '${options.archivePath}.001'
+            : options.archivePath;
+        _listing = await _engine.list(listingPath, password: options.password);
+        _password = options.password;
+        _notifyListeners();
+      }
     } finally {
       _endOperation();
     }

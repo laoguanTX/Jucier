@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:forui/forui.dart';
@@ -8,6 +10,7 @@ import 'package:jucier/archive/archive_formats.dart';
 import 'package:jucier/platform/archive_file_association_service.dart';
 import 'package:jucier/platform/archive_column_preference_store.dart';
 import 'package:jucier/platform/file_access_service.dart';
+import 'package:jucier/platform/finder_action_service.dart';
 import 'package:jucier/platform/single_entry_extraction_preference_store.dart';
 import 'package:jucier/platform/theme_preference_store.dart';
 import 'package:material_ui/material_ui.dart';
@@ -42,6 +45,9 @@ void main() {
     final appearanceCard = tester.getRect(
       find.byKey(const ValueKey('settings-appearance-card')),
     );
+    final header = tester.getRect(
+      find.byKey(const ValueKey('settings-header-background')),
+    );
     final permissionCard = tester.getRect(
       find.byKey(const ValueKey('settings-permission-card')),
     );
@@ -51,9 +57,25 @@ void main() {
     expect((appearanceCard.center.dx - viewCenter.dx).abs(), lessThan(1));
     expect((permissionCard.center.dx - viewCenter.dx).abs(), lessThan(1));
     expect(appearanceCard.bottom, lessThan(permissionCard.top));
-    final cardsCenterY = (appearanceCard.top + permissionCard.bottom) / 2;
-    expect((cardsCenterY - viewCenter.dy).abs(), lessThan(1));
+    expect(appearanceCard.top, greaterThanOrEqualTo(header.bottom + 16));
     expect((actionCenter.dy - permissionCard.center.dy).abs(), lessThan(1));
+
+    final headerDecoration =
+        tester
+                .widget<Container>(
+                  find.byKey(const ValueKey('settings-header-background')),
+                )
+                .decoration
+            as BoxDecoration;
+    expect(headerDecoration.color?.a, 1);
+
+    final scrollable = tester.state<ScrollableState>(
+      find.descendant(
+        of: find.byKey(const ValueKey('settings-scroll-view')),
+        matching: find.byType(Scrollable),
+      ),
+    );
+    expect(scrollable.position.pixels, 0);
 
     final icon = tester.widget<Icon>(
       find.byKey(const ValueKey('settings-permission-icon')),
@@ -354,6 +376,64 @@ void main() {
       findsOneWidget,
     );
   });
+
+  testWidgets('offers a Finder context-menu installation action', (
+    tester,
+  ) async {
+    final installation = Completer<void>();
+    final uninstallation = Completer<void>();
+    final finderActions = _FakeFinderMenuService(
+      installed: false,
+      installation: installation,
+      uninstallation: uninstallation,
+    );
+    final permissions = _FakeFileAccessService(
+      initialStatus: const FileAccessStatus(requested: true, granted: true),
+    );
+
+    await tester.pumpWidget(
+      JucierApp(
+        engine: _UnusedArchiveEngine(),
+        fileAccessService: permissions,
+        themePreferenceStore: _FakeThemePreferenceStore(),
+        finderActionService: finderActions,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('设置'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Finder 右键菜单支持'), findsOneWidget);
+    expect(find.textContaining('安装 Finder 扩展'), findsOneWidget);
+    expect(find.text('安装…'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('settings-finder-menu-action')));
+    await tester.pump();
+
+    expect(find.text('正在安装…'), findsOneWidget);
+    expect(finderActions.repairCalls, 1);
+
+    installation.complete();
+    await tester.pumpAndSettle();
+
+    expect(find.text('已安装'), findsOneWidget);
+    expect(find.text('Finder 右键菜单支持已安装'), findsOneWidget);
+
+    await tester.tap(find.text('好'));
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.byKey(const ValueKey('settings-finder-menu-uninstall')),
+    );
+    await tester.pump();
+
+    expect(find.text('正在卸载…'), findsOneWidget);
+    expect(finderActions.uninstallCalls, 1);
+
+    uninstallation.complete();
+    await tester.pumpAndSettle();
+
+    expect(find.text('安装…'), findsOneWidget);
+    expect(find.text('Finder 右键菜单支持已卸载'), findsOneWidget);
+  });
 }
 
 class _FakeFileAccessService implements FileAccessService {
@@ -390,6 +470,44 @@ class _FakeFileAccessService implements FileAccessService {
 class _UnusedArchiveEngine implements ArchiveEngine {
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+class _FakeFinderMenuService implements FinderActionService {
+  _FakeFinderMenuService({
+    this.installed = true,
+    this.installation,
+    this.uninstallation,
+  });
+
+  FinderActionHandler? handler;
+  bool installed;
+  final Completer<void>? installation;
+  final Completer<void>? uninstallation;
+  int repairCalls = 0;
+  int uninstallCalls = 0;
+
+  @override
+  void setHandler(FinderActionHandler? handler) => this.handler = handler;
+
+  @override
+  Future<void> synchronize() async {}
+
+  @override
+  Future<bool> contextMenuAvailable() async => installed;
+
+  @override
+  Future<void> repairContextMenu() async {
+    repairCalls++;
+    await installation?.future;
+    installed = true;
+  }
+
+  @override
+  Future<void> uninstallContextMenu() async {
+    uninstallCalls++;
+    await uninstallation?.future;
+    installed = false;
+  }
 }
 
 class _FakeThemePreferenceStore implements ThemePreferenceStore {

@@ -8,6 +8,7 @@ import 'archive/seven_zip_engine.dart';
 import 'platform/archive_file_association_service.dart';
 import 'platform/archive_open_service.dart';
 import 'platform/file_access_service.dart';
+import 'platform/finder_action_service.dart';
 import 'platform/archive_column_preference_store.dart';
 import 'platform/single_entry_extraction_preference_store.dart';
 import 'platform/theme_preference_store.dart';
@@ -25,6 +26,7 @@ class JucierApp extends StatefulWidget {
     this.archiveColumnPreferenceStore,
     this.archiveFileAssociationService,
     this.archiveOpenService,
+    this.finderActionService,
     this.waitForInitialArchiveOpen = false,
   });
 
@@ -36,6 +38,7 @@ class JucierApp extends StatefulWidget {
   final ArchiveColumnPreferenceStore? archiveColumnPreferenceStore;
   final ArchiveFileAssociationService? archiveFileAssociationService;
   final ArchiveOpenService? archiveOpenService;
+  final FinderActionService? finderActionService;
   final bool waitForInitialArchiveOpen;
 
   @override
@@ -51,6 +54,7 @@ class _JucierAppState extends State<JucierApp> {
   late final ArchiveColumnPreferenceStore _archiveColumnPreferenceStore;
   late final ArchiveFileAssociationService _archiveFileAssociationService;
   late final ArchiveOpenService _archiveOpenService;
+  late final FinderActionService _finderActionService;
   ThemeMode _themeMode = ThemeMode.system;
   SingleEntryExtractionMode _singleEntryExtractionMode =
       SingleEntryExtractionMode.preserveArchiveStructure;
@@ -78,6 +82,8 @@ class _JucierAppState extends State<JucierApp> {
         MacOSArchiveFileAssociationService();
     _archiveOpenService =
         widget.archiveOpenService ?? MacOSArchiveOpenService();
+    _finderActionService =
+        widget.finderActionService ?? MacOSFinderActionService();
     _loadThemeMode();
     _loadSingleEntryExtractionMode();
     _loadArchiveColumnPreferences();
@@ -159,6 +165,7 @@ class _JucierAppState extends State<JucierApp> {
         fileAccessService: _fileAccessService,
         archiveFileAssociationService: _archiveFileAssociationService,
         archiveOpenService: _archiveOpenService,
+        finderActionService: _finderActionService,
         waitForInitialArchiveOpen: widget.waitForInitialArchiveOpen,
         themeMode: _themeMode,
         onThemeModeChanged: _setThemeMode,

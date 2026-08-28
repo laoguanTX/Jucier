@@ -1,5 +1,6 @@
 import Cocoa
 import FlutterMacOS
+import FinderSync
 import UniformTypeIdentifiers
 
 private class ArchiveFilePromiseDragSource: NSObject,
@@ -117,6 +118,7 @@ class MainFlutterWindow: NSWindow {
   private let singleEntryExtractionModeKey = "singleEntryExtractionMode"
   private let compressionArchiveColumnsKey = "compressionArchiveColumns"
   private let extractionArchiveColumnsKey = "extractionArchiveColumns"
+  private let finderContextMenuInstalledKey = "finderContextMenuInstalled"
   private var completedInitialArchiveOpenCheck = false
   private var scopedURL: URL?
   private var archiveDragSource: ArchiveFilePromiseDragSource?
@@ -142,6 +144,7 @@ class MainFlutterWindow: NSWindow {
     RegisterGeneratedPlugins(registry: flutterViewController)
     configurePlatformChannel(flutterViewController)
     configureArchiveOpenChannel(flutterViewController)
+    configureFinderActionChannel(flutterViewController)
     configureFileDragChannel(flutterViewController)
     restoreFileAccess()
 
@@ -191,6 +194,30 @@ class MainFlutterWindow: NSWindow {
         DispatchQueue.main.async {
           NSApp.terminate(nil)
         }
+      default:
+        result(FlutterMethodNotImplemented)
+      }
+    }
+  }
+
+  private func configureFinderActionChannel(_ controller: FlutterViewController) {
+    let channel = FlutterMethodChannel(
+      name: "dev.jucier/finder_action",
+      binaryMessenger: controller.engine.binaryMessenger)
+    (NSApp.delegate as? AppDelegate)?.attachFinderActionChannel(channel)
+    channel.setMethodCallHandler { [weak self] call, result in
+      guard let self else { return }
+      switch call.method {
+      case "takePendingFinderActions":
+        result((NSApp.delegate as? AppDelegate)?.takePendingFinderActions() ?? [])
+      case "finderContextMenuAvailable":
+        result(
+          self.finderExtensionURL() != nil
+            && UserDefaults.standard.bool(forKey: self.finderContextMenuInstalledKey))
+      case "repairFinderContextMenu":
+        self.repairFinderContextMenu(result: result)
+      case "uninstallFinderContextMenu":
+        self.uninstallFinderContextMenu(result: result)
       default:
         result(FlutterMethodNotImplemented)
       }
@@ -309,6 +336,97 @@ class MainFlutterWindow: NSWindow {
       }
     }
     return extensions
+  }
+
+  private func finderExtensionURL() -> URL? {
+    let url = Bundle.main.bundleURL
+      .appendingPathComponent("Contents", isDirectory: true)
+      .appendingPathComponent("PlugIns", isDirectory: true)
+      .appendingPathComponent("JucierFinderExtension.appex")
+    guard FileManager.default.fileExists(atPath: url.path) else {
+      return nil
+    }
+    return url
+  }
+
+  private func repairFinderContextMenu(result: @escaping FlutterResult) {
+    guard let extensionURL = finderExtensionURL() else {
+      result(FlutterError(
+        code: "finder_extension_missing",
+        message: "应用包中缺少 Jucier Finder 扩展，请重新安装 Jucier",
+        details: nil))
+      return
+    }
+
+    var didFinish = false
+    func finish() {
+      DispatchQueue.main.async {
+        guard !didFinish else { return }
+        didFinish = true
+        UserDefaults.standard.set(true, forKey: self.finderContextMenuInstalledKey)
+        FIFinderSyncController.showExtensionManagementInterface()
+        result(nil)
+      }
+    }
+
+    // The sandboxed pluginkit process can take a while to contact macOS's
+    // extension registry. Keep the UI responsive and show system management
+    // even if registration continues in the background.
+    DispatchQueue.main.asyncAfter(deadline: .now() + 2, execute: finish)
+
+    runPluginKit(["-a", extensionURL.path]) {
+      self.runPluginKit([
+        "-e", "ignore", "-i", "dev.jucier.app.FinderExtension",
+      ]) {
+        self.runPluginKit([
+          "-e", "use", "-i", "dev.jucier.app.FinderExtension",
+        ]) {
+          finish()
+        }
+      }
+    }
+  }
+
+  private func uninstallFinderContextMenu(result: @escaping FlutterResult) {
+    var didFinish = false
+    func finish() {
+      DispatchQueue.main.async {
+        guard !didFinish else { return }
+        didFinish = true
+        UserDefaults.standard.set(false, forKey: self.finderContextMenuInstalledKey)
+        result(nil)
+      }
+    }
+
+    DispatchQueue.main.asyncAfter(deadline: .now() + 2, execute: finish)
+    runPluginKit([
+      "-e", "ignore", "-i", "dev.jucier.app.FinderExtension",
+    ]) {
+      guard let extensionURL = self.finderExtensionURL() else {
+        finish()
+        return
+      }
+      self.runPluginKit(["-r", extensionURL.path]) {
+        finish()
+      }
+    }
+  }
+
+  private func runPluginKit(
+    _ arguments: [String],
+    completion: @escaping () -> Void
+  ) {
+    let task = Process()
+    task.executableURL = URL(fileURLWithPath: "/usr/bin/pluginkit")
+    task.arguments = arguments
+    task.terminationHandler = { _ in completion() }
+    do {
+      try task.run()
+    } catch {
+      DispatchQueue.main.async {
+        completion()
+      }
+    }
   }
 
   private func archiveFileAssociationStatus(_ value: Any?) -> [String: Any] {

@@ -5,6 +5,8 @@ import 'application/jucier_shell.dart';
 import 'archive/archive_column.dart';
 import 'archive/archive_engine.dart';
 import 'archive/seven_zip_engine.dart';
+import 'platform/archive_file_association_service.dart';
+import 'platform/archive_open_service.dart';
 import 'platform/file_access_service.dart';
 import 'platform/archive_column_preference_store.dart';
 import 'platform/single_entry_extraction_preference_store.dart';
@@ -21,6 +23,9 @@ class JucierApp extends StatefulWidget {
     this.themePreferenceStore,
     this.singleEntryExtractionPreferenceStore,
     this.archiveColumnPreferenceStore,
+    this.archiveFileAssociationService,
+    this.archiveOpenService,
+    this.waitForInitialArchiveOpen = false,
   });
 
   final ArchiveEngine? engine;
@@ -29,6 +34,9 @@ class JucierApp extends StatefulWidget {
   final SingleEntryExtractionPreferenceStore?
   singleEntryExtractionPreferenceStore;
   final ArchiveColumnPreferenceStore? archiveColumnPreferenceStore;
+  final ArchiveFileAssociationService? archiveFileAssociationService;
+  final ArchiveOpenService? archiveOpenService;
+  final bool waitForInitialArchiveOpen;
 
   @override
   State<JucierApp> createState() => _JucierAppState();
@@ -41,6 +49,8 @@ class _JucierAppState extends State<JucierApp> {
   late final SingleEntryExtractionPreferenceStore
   _singleEntryExtractionPreferenceStore;
   late final ArchiveColumnPreferenceStore _archiveColumnPreferenceStore;
+  late final ArchiveFileAssociationService _archiveFileAssociationService;
+  late final ArchiveOpenService _archiveOpenService;
   ThemeMode _themeMode = ThemeMode.system;
   SingleEntryExtractionMode _singleEntryExtractionMode =
       SingleEntryExtractionMode.preserveArchiveStructure;
@@ -63,6 +73,11 @@ class _JucierAppState extends State<JucierApp> {
     _archiveColumnPreferenceStore =
         widget.archiveColumnPreferenceStore ??
         MacOSArchiveColumnPreferenceStore();
+    _archiveFileAssociationService =
+        widget.archiveFileAssociationService ??
+        MacOSArchiveFileAssociationService();
+    _archiveOpenService =
+        widget.archiveOpenService ?? MacOSArchiveOpenService();
     _loadThemeMode();
     _loadSingleEntryExtractionMode();
     _loadArchiveColumnPreferences();
@@ -142,6 +157,9 @@ class _JucierAppState extends State<JucierApp> {
       home: JucierShell(
         engine: _engine,
         fileAccessService: _fileAccessService,
+        archiveFileAssociationService: _archiveFileAssociationService,
+        archiveOpenService: _archiveOpenService,
+        waitForInitialArchiveOpen: widget.waitForInitialArchiveOpen,
         themeMode: _themeMode,
         onThemeModeChanged: _setThemeMode,
         singleEntryExtractionMode: _singleEntryExtractionMode,

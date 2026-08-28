@@ -3,6 +3,9 @@ import FlutterMacOS
 
 @main
 class AppDelegate: FlutterAppDelegate {
+  private var archiveOpenChannel: FlutterMethodChannel?
+  private var pendingOpenPaths: [String] = []
+
   @IBAction func showSettings(_ sender: Any?) {
     guard
       let window = mainFlutterWindow,
@@ -18,6 +21,26 @@ class AppDelegate: FlutterAppDelegate {
 
   override func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
     return true
+  }
+
+  override func application(_ application: NSApplication, open urls: [URL]) {
+    let paths = urls.filter(\.isFileURL).map(\.path)
+    for path in paths where !pendingOpenPaths.contains(path) {
+      pendingOpenPaths.append(path)
+    }
+    if !paths.isEmpty {
+      archiveOpenChannel?.invokeMethod("archiveFilesAvailable", arguments: nil)
+    }
+  }
+
+  func attachArchiveOpenChannel(_ channel: FlutterMethodChannel) {
+    archiveOpenChannel = channel
+  }
+
+  func takePendingOpenPaths() -> [String] {
+    let paths = pendingOpenPaths
+    pendingOpenPaths.removeAll()
+    return paths
   }
 
   override func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool {

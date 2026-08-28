@@ -117,6 +117,7 @@ class MainFlutterWindow: NSWindow {
   private let singleEntryExtractionModeKey = "singleEntryExtractionMode"
   private let compressionArchiveColumnsKey = "compressionArchiveColumns"
   private let extractionArchiveColumnsKey = "extractionArchiveColumns"
+  private var completedInitialArchiveOpenCheck = false
   private var scopedURL: URL?
   private var archiveDragSource: ArchiveFilePromiseDragSource?
   private var archiveDragResult: FlutterResult?
@@ -140,6 +141,7 @@ class MainFlutterWindow: NSWindow {
 
     RegisterGeneratedPlugins(registry: flutterViewController)
     configurePlatformChannel(flutterViewController)
+    configureArchiveOpenChannel(flutterViewController)
     configureFileDragChannel(flutterViewController)
     restoreFileAccess()
 
@@ -158,6 +160,40 @@ class MainFlutterWindow: NSWindow {
         return
       }
       self.beginArchiveEntryDrag(call.arguments, channel: channel, result: result)
+    }
+  }
+
+  private func configureArchiveOpenChannel(_ controller: FlutterViewController) {
+    let channel = FlutterMethodChannel(
+      name: "dev.jucier/archive_open",
+      binaryMessenger: controller.engine.binaryMessenger)
+    (NSApp.delegate as? AppDelegate)?.attachArchiveOpenChannel(channel)
+    channel.setMethodCallHandler { [weak self] call, result in
+      guard let self else {
+        result([])
+        return
+      }
+      switch call.method {
+      case "takePendingOpenFiles":
+        if self.completedInitialArchiveOpenCheck {
+          result((NSApp.delegate as? AppDelegate)?.takePendingOpenPaths() ?? [])
+        } else {
+          self.completedInitialArchiveOpenCheck = true
+          // On a cold document launch, Launch Services may deliver openURLs
+          // just after Flutter's first frame. Keep the initial launch gate in
+          // place until that native event has had a chance to enter the queue.
+          DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            result((NSApp.delegate as? AppDelegate)?.takePendingOpenPaths() ?? [])
+          }
+        }
+      case "quitApplication":
+        result(nil)
+        DispatchQueue.main.async {
+          NSApp.terminate(nil)
+        }
+      default:
+        result(FlutterMethodNotImplemented)
+      }
     }
   }
 
@@ -252,10 +288,90 @@ class MainFlutterWindow: NSWindow {
         result(self.storedArchiveColumnPreferences())
       case "setArchiveColumnPreferences":
         self.setArchiveColumnPreferences(call.arguments, result: result)
+      case "archiveFileAssociationStatus":
+        result(self.archiveFileAssociationStatus(call.arguments))
+      case "setDefaultArchiveFormats":
+        self.setDefaultArchiveFormats(call.arguments, result: result)
       default:
         result(FlutterMethodNotImplemented)
       }
     }
+  }
+
+  private func archiveExtensions(_ value: Any?) -> [String] {
+    guard let values = value as? [String] else { return [] }
+    var extensions: [String] = []
+    for value in values {
+      let normalized = value.lowercased()
+        .trimmingCharacters(in: CharacterSet(charactersIn: "."))
+      if !normalized.isEmpty && !extensions.contains(normalized) {
+        extensions.append(normalized)
+      }
+    }
+    return extensions
+  }
+
+  private func archiveFileAssociationStatus(_ value: Any?) -> [String: Any] {
+    let applicationURL = Bundle.main.bundleURL.standardizedFileURL
+    let defaults = archiveExtensions(value).filter { fileExtension in
+      guard let contentType = UTType(filenameExtension: fileExtension),
+        let handlerURL = NSWorkspace.shared.urlForApplication(toOpen: contentType)
+      else {
+        return false
+      }
+      return handlerURL.standardizedFileURL == applicationURL
+    }
+    return ["available": true, "defaults": defaults]
+  }
+
+  private func setDefaultArchiveFormats(_ value: Any?, result: @escaping FlutterResult) {
+    let extensions = archiveExtensions(value)
+    guard !extensions.isEmpty else {
+      result(FlutterError(
+        code: "empty_archive_formats",
+        message: "请至少选择一种压缩包格式",
+        details: nil))
+      return
+    }
+
+    let applicationURL = Bundle.main.bundleURL
+    var index = 0
+    var failures: [String] = []
+
+    func bindNext() {
+      guard index < extensions.count else {
+        DispatchQueue.main.async {
+          if failures.isEmpty {
+            result(self.archiveFileAssociationStatus(extensions))
+          } else {
+            result(FlutterError(
+              code: "archive_association_failed",
+              message: "无法绑定以下格式：\(failures.joined(separator: ", "))",
+              details: failures))
+          }
+        }
+        return
+      }
+
+      let fileExtension = extensions[index]
+      index += 1
+      guard let contentType = UTType(filenameExtension: fileExtension) else {
+        failures.append(fileExtension)
+        bindNext()
+        return
+      }
+      NSWorkspace.shared.setDefaultApplication(
+        at: applicationURL,
+        toOpen: contentType
+      ) { error in
+        if error != nil {
+          failures.append(fileExtension)
+        }
+        bindNext()
+      }
+    }
+
+    bindNext()
   }
 
   private func openFile(_ value: Any?, result: FlutterResult) {

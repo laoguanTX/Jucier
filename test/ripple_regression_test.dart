@@ -35,7 +35,9 @@ void main() {
 }
 
 double? _rippleProgress(WidgetTester tester) {
-  for (final paint in tester.widgetList<CustomPaint>(find.byType(CustomPaint))) {
+  for (final paint in tester.widgetList<CustomPaint>(
+    find.byType(CustomPaint),
+  )) {
     if (paint.painter.runtimeType.toString().contains('Ripple')) {
       return (paint.painter as dynamic).progress as double;
     }

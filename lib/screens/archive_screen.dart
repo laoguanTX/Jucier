@@ -127,6 +127,7 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
           child: Row(
             children: [
               FButton.icon(
+                key: const ValueKey('archive-close'),
                 variant: FButtonVariant.ghost,
                 onPress: widget.enabled ? widget.onClose : null,
                 semanticsLabel: composing ? '取消创建压缩包' : '关闭压缩包',

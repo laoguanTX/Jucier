@@ -4,6 +4,8 @@ import 'package:forui/forui.dart';
 import 'package:jucier/app.dart';
 import 'package:jucier/archive/archive_column.dart';
 import 'package:jucier/archive/archive_engine.dart';
+import 'package:jucier/archive/archive_formats.dart';
+import 'package:jucier/platform/archive_file_association_service.dart';
 import 'package:jucier/platform/archive_column_preference_store.dart';
 import 'package:jucier/platform/file_access_service.dart';
 import 'package:jucier/platform/single_entry_extraction_preference_store.dart';
@@ -297,6 +299,61 @@ void main() {
       findsNothing,
     );
   });
+
+  testWidgets('selects all archive formats to make Jucier the default app', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(860, 620);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final associations = _FakeArchiveFileAssociationService(
+      const ArchiveFileAssociationStatus(
+        available: true,
+        defaultExtensions: {'zip'},
+      ),
+    );
+    final permissions = _FakeFileAccessService(
+      initialStatus: const FileAccessStatus(requested: true, granted: true),
+    );
+
+    await tester.pumpWidget(
+      JucierApp(
+        engine: _UnusedArchiveEngine(),
+        fileAccessService: permissions,
+        themePreferenceStore: _FakeThemePreferenceStore(),
+        archiveFileAssociationService: associations,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('设置'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('默认打开方式'), findsOneWidget);
+    expect(find.text('Jucier 已是 1 种压缩包格式的默认打开方式。'), findsOneWidget);
+    await tester.tap(
+      find.byKey(const ValueKey('settings-file-association-action')),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('当前默认'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('associate-select-all')));
+    await tester.pump();
+    expect(
+      find.text('已选择 ${supportedArchiveExtensions.length} 项'),
+      findsOneWidget,
+    );
+    await tester.tap(find.byKey(const ValueKey('apply-archive-associations')));
+    await tester.pumpAndSettle();
+
+    expect(associations.boundExtensions, [supportedArchiveExtensions]);
+    expect(
+      find.text(
+        'Jucier 已是 ${supportedArchiveExtensions.length} 种压缩包格式的默认打开方式。',
+      ),
+      findsOneWidget,
+    );
+  });
 }
 
 class _FakeFileAccessService implements FileAccessService {
@@ -380,5 +437,29 @@ class _FakeArchiveColumnPreferenceStore
   Future<void> save(ArchiveColumnPreferences preferences) async {
     this.preferences = preferences;
     saved.add(preferences);
+  }
+}
+
+class _FakeArchiveFileAssociationService
+    implements ArchiveFileAssociationService {
+  _FakeArchiveFileAssociationService(this.current);
+
+  ArchiveFileAssociationStatus current;
+  final List<List<String>> boundExtensions = [];
+
+  @override
+  Future<ArchiveFileAssociationStatus> status(List<String> extensions) async =>
+      current;
+
+  @override
+  Future<ArchiveFileAssociationStatus> setAsDefault(
+    List<String> extensions,
+  ) async {
+    boundExtensions.add(extensions);
+    current = ArchiveFileAssociationStatus(
+      available: true,
+      defaultExtensions: {...current.defaultExtensions, ...extensions},
+    );
+    return current;
   }
 }

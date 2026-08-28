@@ -55,21 +55,27 @@ Future<SourcePickerChoice?> showSourcePicker(
   ),
 );
 
-Future<CreateArchiveOptions?> showCreateArchiveDialog(BuildContext context, {required List<String> sources}) =>
-    showFDialog<CreateArchiveOptions>(
-      context: context,
-      barrierDismissible: false,
-      builder: (context, _, animation) {
-        final availableHeight = MediaQuery.sizeOf(context).height - 48;
-        return FDialog(
-          animation: animation,
-          constraints: BoxConstraints(minWidth: 500, maxWidth: 560, maxHeight: availableHeight),
-          builder: (context, style) => SingleChildScrollView(
-            child: _CreateArchiveForm(style: style, sources: sources),
-          ),
-        );
-      },
+Future<CreateArchiveOptions?> showCreateArchiveDialog(
+  BuildContext context, {
+  required List<String> sources,
+}) => showFDialog<CreateArchiveOptions>(
+  context: context,
+  barrierDismissible: false,
+  builder: (context, _, animation) {
+    final availableHeight = MediaQuery.sizeOf(context).height - 48;
+    return FDialog(
+      animation: animation,
+      constraints: BoxConstraints(
+        minWidth: 500,
+        maxWidth: 560,
+        maxHeight: availableHeight,
+      ),
+      builder: (context, style) => SingleChildScrollView(
+        child: _CreateArchiveForm(style: style, sources: sources),
+      ),
     );
+  },
+);
 
 class _CreateArchiveForm extends StatefulWidget {
   const _CreateArchiveForm({required this.style, required this.sources});
@@ -99,8 +105,12 @@ class _CreateArchiveFormState extends State<_CreateArchiveForm> {
   void initState() {
     super.initState();
     final first = widget.sources.first;
-    final base = widget.sources.length == 1 ? p.basenameWithoutExtension(first) : 'Archive';
-    _pathController = TextEditingController(text: p.join(p.dirname(first), '$base.${_format.extension}'));
+    final base = widget.sources.length == 1
+        ? p.basenameWithoutExtension(first)
+        : 'Archive';
+    _pathController = TextEditingController(
+      text: p.join(p.dirname(first), '$base.${_format.extension}'),
+    );
   }
 
   @override
@@ -134,11 +144,22 @@ class _CreateArchiveFormState extends State<_CreateArchiveForm> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('创建压缩包', key: const ValueKey('create-archive-title'), style: largeTitleStyle),
+          Text(
+            '创建压缩包',
+            key: const ValueKey('create-archive-title'),
+            style: largeTitleStyle,
+          ),
           const SizedBox(height: 6),
-          Text('${widget.sources.length} 个来源', style: widget.style.bodyTextStyle),
+          Text(
+            '${widget.sources.length} 个来源',
+            style: widget.style.bodyTextStyle,
+          ),
           const SizedBox(height: 12),
-          Text('保存位置', key: const ValueKey('save-location-title'), style: smallTitleStyle),
+          Text(
+            '保存位置',
+            key: const ValueKey('save-location-title'),
+            style: smallTitleStyle,
+          ),
           const SizedBox(height: 6),
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -148,7 +169,9 @@ class _CreateArchiveFormState extends State<_CreateArchiveForm> {
                   height: _controlHeight,
                   child: FTextField(
                     key: const ValueKey('save-location-field'),
-                    control: FTextFieldControl.managed(controller: _pathController),
+                    control: FTextFieldControl.managed(
+                      controller: _pathController,
+                    ),
                   ),
                 ),
               ),
@@ -170,7 +193,9 @@ class _CreateArchiveFormState extends State<_CreateArchiveForm> {
             Text(
               _error!,
               key: const ValueKey('save-location-error'),
-              style: context.theme.typography.body.xs.copyWith(color: context.theme.colors.error),
+              style: context.theme.typography.body.xs.copyWith(
+                color: context.theme.colors.error,
+              ),
             ),
           ],
           // const SizedBox(height: 14),
@@ -185,9 +210,16 @@ class _CreateArchiveFormState extends State<_CreateArchiveForm> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('压缩格式', key: const ValueKey('archive-format-title'), style: smallTitleStyle),
+                      Text(
+                        '压缩格式',
+                        key: const ValueKey('archive-format-title'),
+                        style: smallTitleStyle,
+                      ),
                       const SizedBox(height: 6),
-                      SizedBox(height: _controlHeight, child: _buildFormatSelect()),
+                      SizedBox(
+                        height: _controlHeight,
+                        child: _buildFormatSelect(),
+                      ),
                     ],
                   ),
                 ),
@@ -218,13 +250,19 @@ class _CreateArchiveFormState extends State<_CreateArchiveForm> {
             ),
           ),
           // const SizedBox(height: 8),
-          Text('压缩密码', key: const ValueKey('compression-password-title'), style: smallTitleStyle),
+          Text(
+            '压缩密码',
+            key: const ValueKey('compression-password-title'),
+            style: smallTitleStyle,
+          ),
           const SizedBox(height: 6),
           SizedBox(
             height: _controlHeight,
             child: FTextField(
               key: const ValueKey('compression-password-field'),
-              control: FTextFieldControl.managed(controller: _passwordController),
+              control: FTextFieldControl.managed(
+                controller: _passwordController,
+              ),
               enabled: _format.supportsPassword,
               obscureText: true,
               hint: '可选',
@@ -239,11 +277,19 @@ class _CreateArchiveFormState extends State<_CreateArchiveForm> {
             ),
             children: [
               FAccordionItem(
-                title: Text('高级选项', key: const ValueKey('advanced-options-title'), style: mediumTitleStyle),
+                title: Text(
+                  '高级选项',
+                  key: const ValueKey('advanced-options-title'),
+                  style: mediumTitleStyle,
+                ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('分卷大小', key: const ValueKey('volume-size-title'), style: smallTitleStyle),
+                    Text(
+                      '分卷大小',
+                      key: const ValueKey('volume-size-title'),
+                      style: smallTitleStyle,
+                    ),
                     const SizedBox(height: 6),
                     Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -253,13 +299,19 @@ class _CreateArchiveFormState extends State<_CreateArchiveForm> {
                             height: _controlHeight,
                             child: FTextField(
                               key: const ValueKey('volume-size-field'),
-                              control: FTextFieldControl.managed(controller: _volumeController),
+                              control: FTextFieldControl.managed(
+                                controller: _volumeController,
+                              ),
                               keyboardType: TextInputType.number,
                             ),
                           ),
                         ),
                         const SizedBox(width: 8),
-                        SizedBox(width: 96, height: _controlHeight, child: _buildVolumeUnitSelect()),
+                        SizedBox(
+                          width: 96,
+                          height: _controlHeight,
+                          child: _buildVolumeUnitSelect(),
+                        ),
                       ],
                     ),
                   ],
@@ -278,7 +330,11 @@ class _CreateArchiveFormState extends State<_CreateArchiveForm> {
                 child: const Text('取消'),
               ),
               const SizedBox(width: 8),
-              FButton(size: FButtonSizeVariant.sm, onPress: _submit, child: const Text('创建')),
+              FButton(
+                size: FButtonSizeVariant.sm,
+                onPress: _submit,
+                child: const Text('创建'),
+              ),
             ],
           ),
         ],
@@ -353,7 +409,9 @@ class _CreateArchiveFormState extends State<_CreateArchiveForm> {
         sources: widget.sources,
         format: _format,
         compressionLevel: _level.round(),
-        password: _passwordController.text.trim().isEmpty ? null : _passwordController.text,
+        password: _passwordController.text.trim().isEmpty
+            ? null
+            : _passwordController.text,
         volumeSize: _volumeController.text.trim().isEmpty
             ? null
             : '${_volumeController.text.trim()}${_volumeUnit.sevenZipSuffix}',

@@ -21,6 +21,8 @@ import '../dialogs/message_dialog.dart';
 import '../dialogs/password_dialog.dart';
 import '../platform/file_access_service.dart';
 import '../platform/archive_drag_service.dart';
+import '../platform/archive_file_association_service.dart';
+import '../platform/archive_open_service.dart';
 import '../platform/file_preview_service.dart';
 import '../platform/single_entry_extraction_preference_store.dart';
 import '../screens/archive_screen.dart';
@@ -41,6 +43,9 @@ class JucierShell extends StatefulWidget {
   const JucierShell({
     required this.engine,
     required this.fileAccessService,
+    required this.archiveFileAssociationService,
+    required this.archiveOpenService,
+    this.waitForInitialArchiveOpen = false,
     this.themeMode = ThemeMode.system,
     this.onThemeModeChanged,
     this.fileLauncher,
@@ -54,6 +59,9 @@ class JucierShell extends StatefulWidget {
 
   final ArchiveEngine engine;
   final FileAccessService fileAccessService;
+  final ArchiveFileAssociationService archiveFileAssociationService;
+  final ArchiveOpenService archiveOpenService;
+  final bool waitForInitialArchiveOpen;
   final ThemeMode themeMode;
   final ValueChanged<ThemeMode>? onThemeModeChanged;
   final FileLauncher? fileLauncher;
@@ -75,6 +83,9 @@ class _JucierShellState extends State<JucierShell> {
   final Map<String, _ArchiveDragPayload> _dragPayloads = {};
   int _nextDragId = 0;
   Future<void> _previewPromptQueue = Future.value();
+  late bool _checkingForExternalArchive;
+  bool _openingExternalArchive = false;
+  bool _externalArchiveSession = false;
   bool _settingsOpen = false;
   bool _creatingArchive = false;
   bool _draftLoading = false;
@@ -88,6 +99,7 @@ class _JucierShellState extends State<JucierShell> {
   @override
   void initState() {
     super.initState();
+    _checkingForExternalArchive = widget.waitForInitialArchiveOpen;
     _workflow = ArchiveWorkflowController(widget.engine);
     _previews = FilePreviewService(
       launcher: widget.fileLauncher ?? MacOSFileLauncher(),
@@ -97,14 +109,17 @@ class _JucierShellState extends State<JucierShell> {
       onMaterialize: _materializeDraggedEntry,
     );
     widget.fileAccessService.setOpenSettingsHandler(_openSettings);
-    WidgetsBinding.instance.addPostFrameCallback(
-      (_) => _requestInitialAccess(),
-    );
+    widget.archiveOpenService.setHandler(_openExternalArchive);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(_synchronizeExternalOpenRequests());
+      unawaited(_requestInitialAccess());
+    });
   }
 
   @override
   void dispose() {
     widget.fileAccessService.setOpenSettingsHandler(null);
+    widget.archiveOpenService.setHandler(null);
     unawaited(_previews.dispose());
     _archiveDragService.dispose();
     _workflow.dispose();
@@ -153,10 +168,16 @@ class _JucierShellState extends State<JucierShell> {
   );
 
   Widget _buildCurrentPage() {
+    if (_checkingForExternalArchive || _openingExternalArchive) {
+      return const SizedBox.expand(
+        key: ValueKey('external-archive-launch-page'),
+      );
+    }
     if (_settingsOpen) {
       return SettingsScreen(
         key: const ValueKey('settings-page'),
         fileAccessService: widget.fileAccessService,
+        archiveFileAssociationService: widget.archiveFileAssociationService,
         themeMode: widget.themeMode,
         onThemeModeChanged: widget.onThemeModeChanged,
         singleEntryExtractionMode: widget.singleEntryExtractionMode,
@@ -204,7 +225,7 @@ class _JucierShellState extends State<JucierShell> {
       listing: _workflow.listing!,
       enabled: !_workflow.busy,
       columns: widget.archiveColumnPreferences.extractionColumns,
-      onClose: _workflow.closeArchive,
+      onClose: _closeOpenArchive,
       onExtract: _extractCurrentArchive,
       onTest: _testCurrentArchive,
       onPreviewEntry: _previewEntry,
@@ -220,6 +241,11 @@ class _JucierShellState extends State<JucierShell> {
 
   void _openSettings() {
     if (mounted) setState(() => _settingsOpen = true);
+  }
+
+  Future<void> _synchronizeExternalOpenRequests() async {
+    await widget.archiveOpenService.synchronize();
+    if (mounted) setState(() => _checkingForExternalArchive = false);
   }
 
   Future<void> _requestInitialAccess() async {
@@ -333,6 +359,35 @@ class _JucierShellState extends State<JucierShell> {
         await showMessageDialog(context, title: '无法打开', message: error.message);
       }
     }
+  }
+
+  Future<void> _openExternalArchive(String path) async {
+    if (!isSupportedArchivePath(path)) return;
+    await _workflow.waitUntilIdle();
+    if (!mounted) return;
+    setState(() {
+      _openingExternalArchive = true;
+      _externalArchiveSession = true;
+      _settingsOpen = false;
+      _creatingArchive = false;
+      _draftLoading = false;
+      _draftSources = [];
+    });
+    await _openArchive(path);
+    if (!mounted) return;
+    if (_workflow.listing?.archivePath != path) {
+      await widget.archiveOpenService.quitApplication();
+      return;
+    }
+    setState(() => _openingExternalArchive = false);
+  }
+
+  void _closeOpenArchive() {
+    if (_externalArchiveSession) {
+      unawaited(widget.archiveOpenService.quitApplication());
+      return;
+    }
+    _workflow.closeArchive();
   }
 
   Future<void> _createDraftArchive() async {

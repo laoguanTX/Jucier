@@ -1,15 +1,21 @@
 import 'package:flutter/widgets.dart';
+import 'package:flutter/services.dart';
 import 'package:forui/forui.dart';
 import 'package:material_ui/material_ui.dart' show ThemeMode;
 
 import '../archive/archive_column.dart';
+import '../archive/archive_formats.dart';
 import '../dialogs/archive_columns_dialog.dart';
+import '../dialogs/archive_file_association_dialog.dart';
+import '../dialogs/message_dialog.dart';
+import '../platform/archive_file_association_service.dart';
 import '../platform/file_access_service.dart';
 import '../platform/single_entry_extraction_preference_store.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({
     required this.fileAccessService,
+    required this.archiveFileAssociationService,
     required this.themeMode,
     required this.onBack,
     this.onThemeModeChanged,
@@ -22,6 +28,7 @@ class SettingsScreen extends StatefulWidget {
   });
 
   final FileAccessService fileAccessService;
+  final ArchiveFileAssociationService archiveFileAssociationService;
   final ThemeMode themeMode;
   final ValueChanged<ThemeMode>? onThemeModeChanged;
   final SingleEntryExtractionMode singleEntryExtractionMode;
@@ -38,12 +45,15 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   FileAccessStatus? _status;
+  ArchiveFileAssociationStatus? _associationStatus;
   bool _requesting = false;
+  bool _bindingFormats = false;
 
   @override
   void initState() {
     super.initState();
     _loadStatus();
+    _loadAssociationStatus();
   }
 
   Future<void> _loadStatus() async {
@@ -60,6 +70,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _requesting = false;
       });
     }
+  }
+
+  Future<void> _loadAssociationStatus() async {
+    final status = await widget.archiveFileAssociationService.status(
+      supportedArchiveExtensions,
+    );
+    if (mounted) setState(() => _associationStatus = status);
   }
 
   @override
@@ -135,6 +152,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                   ),
                   const SizedBox(height: 14),
+                  if (_associationStatus?.available == true) ...[
+                    _SettingsCard(
+                      key: const ValueKey('settings-file-association-card'),
+                      icon: FLucideIcons.fileArchive,
+                      title: '默认打开方式',
+                      description: _associationDescription(),
+                      trailing: FButton(
+                        key: const ValueKey('settings-file-association-action'),
+                        size: FButtonSizeVariant.sm,
+                        variant: FButtonVariant.outline,
+                        onPress: _bindingFormats
+                            ? null
+                            : _configureFileAssociations,
+                        child: Text(_bindingFormats ? '正在绑定…' : '选择格式…'),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                  ],
                   _SettingsCard(
                     key: const ValueKey('settings-archive-columns-card'),
                     icon: FLucideIcons.listTree,
@@ -260,6 +295,49 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ? preferences.copyWith(compressionColumns: updated)
           : preferences.copyWith(extractionColumns: updated),
     );
+  }
+
+  String _associationDescription() {
+    final count = _associationStatus?.defaultExtensions.length ?? 0;
+    return count == 0
+        ? '选择由 Jucier 默认打开的压缩包格式。'
+        : 'Jucier 已是 $count 种压缩包格式的默认打开方式。';
+  }
+
+  Future<void> _configureFileAssociations() async {
+    final selected = await showArchiveFileAssociationDialog(
+      context,
+      defaultExtensions:
+          _associationStatus?.defaultExtensions ?? const <String>{},
+    );
+    if (selected == null || selected.isEmpty || !mounted) return;
+    setState(() => _bindingFormats = true);
+    try {
+      final status = await widget.archiveFileAssociationService.setAsDefault(
+        selected,
+      );
+      if (mounted) {
+        setState(() {
+          _associationStatus = ArchiveFileAssociationStatus(
+            available: status.available,
+            defaultExtensions: {
+              ...?_associationStatus?.defaultExtensions,
+              ...status.defaultExtensions,
+            },
+          );
+        });
+      }
+    } on PlatformException catch (error) {
+      if (mounted) {
+        await showMessageDialog(
+          context,
+          title: '无法更改默认打开方式',
+          message: error.message ?? 'macOS 未能完成文件格式绑定。',
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _bindingFormats = false);
+    }
   }
 }
 

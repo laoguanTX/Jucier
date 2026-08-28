@@ -39,6 +39,24 @@ const supportedArchiveExtensions = <String>[
   '001',
 ];
 
+const _archiveExtensionLabels = <String, String>{
+  '7z': '7-Zip 压缩包 (.7z)',
+  'zip': 'ZIP 压缩包 (.zip)',
+  'rar': 'RAR 压缩包 (.rar)',
+  'tar': 'TAR 压缩包 (.tar)',
+  'gz': 'Gzip 压缩包 (.gz)',
+  'tgz': 'Gzip TAR 压缩包 (.tgz)',
+  'bz2': 'Bzip2 压缩包 (.bz2)',
+  'xz': 'XZ 压缩包 (.xz)',
+  'zst': 'Zstandard 压缩包 (.zst)',
+  'iso': 'ISO 磁盘映像 (.iso)',
+  'dmg': 'Apple 磁盘映像 (.dmg)',
+};
+
+String archiveExtensionLabel(String extension) =>
+    _archiveExtensionLabels[extension] ??
+    '${extension.toUpperCase()} 文件 (.$extension)';
+
 final Set<String> _supportedArchiveSuffixes = {
   for (final extension in supportedArchiveExtensions) '.$extension',
 };

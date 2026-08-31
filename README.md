@@ -33,8 +33,9 @@ visible in a compact footer.
 ## Build 7-Zip from source
 
 The build is pinned to the version and checksum in `third_party/7zip`. It
-downloads the official source archive, verifies it, compiles the full `Alone2`
-console executable, and installs the result as a Flutter asset:
+downloads the official source archive, verifies it, compiles both arm64 and
+x86_64 slices of the full `Alone2` console executable, combines them into a
+Universal binary, and installs the result as a Flutter asset:
 
 ```sh
 ./tool/build_7zip_macos.sh
@@ -44,13 +45,6 @@ Run that command once before starting the app:
 
 ```sh
 flutter run -d macos
-```
-
-For a Universal binary, build once on Apple Silicon and once on Intel, then
-combine the two artifacts:
-
-```sh
-./tool/create_universal_7zip.sh /path/to/arm64/7zz /path/to/x86_64/7zz
 ```
 
 During development, `JUCIER_7ZZ_PATH` can point Jucier at another `7zz`

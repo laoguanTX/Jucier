@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -28,6 +27,8 @@ class SevenZipEngine implements ArchiveEngine {
     'operation not permitted',
     'errno=13',
   ];
+
+  static final _progressPattern = RegExp(r'(?<!\d)(\d{1,3})%');
 
   @override
   Future<bool> get isAvailable async {
@@ -82,8 +83,13 @@ class SevenZipEngine implements ArchiveEngine {
       '-mx=${options.compressionLevel}',
       '-y',
       '-bsp1',
-      '-bb1',
+      '-bb0',
     ];
+    if (Platform.isMacOS && options.format.supportsSymbolicLinks) {
+      // 7-Zip follows links by default. That can recursively duplicate large
+      // macOS app bundles and frameworks instead of archiving the link itself.
+      args.add('-snl');
+    }
     if (options.password case final password? when password.isNotEmpty) {
       args.add('-p$password');
       if (options.format == ArchiveFormat.sevenZip) args.add('-mhe=on');
@@ -110,7 +116,7 @@ class SevenZipEngine implements ArchiveEngine {
       options.conflict.switchValue,
       '-y',
       '-bsp1',
-      '-bb1',
+      '-bb0',
     ];
     if (options.password case final password? when password.isNotEmpty) {
       args.add('-p$password');
@@ -147,7 +153,7 @@ class SevenZipEngine implements ArchiveEngine {
       options.conflict.switchValue,
       '-y',
       '-bsp1',
-      '-bb1',
+      '-bb0',
     ];
     if (options.password case final password? when password.isNotEmpty) {
       args.add('-p$password');
@@ -206,7 +212,9 @@ class SevenZipEngine implements ArchiveEngine {
         relativePaths.add(relativePath);
       }
 
-      final args = <String>['a', options.archivePath, '-y', '-bsp1', '-bb1'];
+      // Do not use -snl here: the staging links intentionally provide archive
+      // paths without copying source files and must therefore be followed.
+      final args = <String>['a', options.archivePath, '-y', '-bsp1', '-bb0'];
       if (options.password case final password? when password.isNotEmpty) {
         args.add('-p$password');
       }
@@ -234,7 +242,7 @@ class SevenZipEngine implements ArchiveEngine {
         '-aoa',
         '-y',
         '-bsp1',
-        '-bb1',
+        '-bb0',
       ];
       if (options.password case final password? when password.isNotEmpty) {
         args.add('-p$password');
@@ -387,7 +395,7 @@ class SevenZipEngine implements ArchiveEngine {
       await staged.parent.create(recursive: true);
       await source.copy(staged.path);
 
-      final args = <String>['u', archivePath, '-y', '-bsp1', '-bb1'];
+      final args = <String>['u', archivePath, '-y', '-bsp1', '-bb0'];
       if (password case final value? when value.isNotEmpty) {
         args.add('-p$value');
       }
@@ -409,7 +417,7 @@ class SevenZipEngine implements ArchiveEngine {
       throw const ArchiveException('没有选择要删除的文件');
     }
     final entries = entryPaths.map(normalizeArchiveEntryPath).toList();
-    final args = <String>['d', archivePath, '-y', '-bsp1', '-bb1'];
+    final args = <String>['d', archivePath, '-y', '-bsp1', '-bb0'];
     if (password case final value? when value.isNotEmpty) {
       args.add('-p$value');
     }
@@ -423,7 +431,7 @@ class SevenZipEngine implements ArchiveEngine {
     String? password,
     ProgressCallback? onProgress,
   }) async {
-    final args = <String>['t', archivePath, '-bsp1', '-bb1'];
+    final args = <String>['t', archivePath, '-bsp1', '-bb0'];
     if (password != null && password.isNotEmpty) args.add('-p$password');
     await _run(args, onProgress: onProgress);
   }
@@ -455,26 +463,35 @@ class SevenZipEngine implements ArchiveEngine {
     _activeProcess = process;
 
     final output = StringBuffer();
-    final subscriptions = <StreamSubscription<String>>[];
+    var lastProgress = -1;
     void consume(String text) {
       output.write(text);
       if (onProgress != null) {
-        for (final match in RegExp(r'(?<!\d)(\d{1,3})%').allMatches(text)) {
+        for (final match in _progressPattern.allMatches(text)) {
           final value = int.tryParse(match.group(1)!);
-          if (value != null) onProgress((value.clamp(0, 100)) / 100);
+          if (value != null) {
+            final normalized = value.clamp(0, 100);
+            if (normalized != lastProgress) {
+              lastProgress = normalized;
+              onProgress(normalized / 100);
+            }
+          }
         }
       }
     }
 
-    subscriptions
-      ..add(process.stdout.transform(utf8.decoder).listen(consume))
-      ..add(process.stderr.transform(utf8.decoder).listen(consume));
+    final outputStreams = <Future<void>>[
+      process.stdout.transform(utf8.decoder).forEach(consume),
+      process.stderr.transform(utf8.decoder).forEach(consume),
+    ];
 
-    final exitCode = await process.exitCode;
-    await Future.wait(
-      subscriptions.map((subscription) => subscription.cancel()),
-    );
-    _activeProcess = null;
+    late final int exitCode;
+    try {
+      exitCode = await process.exitCode;
+      await Future.wait(outputStreams);
+    } finally {
+      if (identical(_activeProcess, process)) _activeProcess = null;
+    }
 
     if (_cancelRequested || exitCode == 255) {
       _cancelRequested = false;
@@ -483,7 +500,7 @@ class SevenZipEngine implements ArchiveEngine {
 
     final text = output.toString();
     if (exitCode != 0) _throwForFailure(exitCode, text);
-    onProgress?.call(1);
+    if (lastProgress != 100) onProgress?.call(1);
     return text;
   }
 

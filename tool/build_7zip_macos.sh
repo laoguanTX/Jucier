@@ -4,32 +4,26 @@ set -eu
 project_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 source_dir=$($project_dir/tool/download_7zip.sh)
 bundle_dir="$source_dir/CPP/7zip/Bundles/Alone2"
-architecture=$(uname -m)
 
-case "$architecture" in
-  arm64)
-    makefile='../../cmpl_mac_arm64.mak'
-    ;;
-  x86_64)
-    makefile='../../cmpl_clang.mak'
-    ;;
-  *)
-    printf 'Unsupported macOS architecture: %s\n' "$architecture" >&2
+(cd "$bundle_dir" && make -j -f ../../cmpl_mac_arm64.mak \
+  MY_ARCH='-arch arm64 -Wno-poison-system-directories')
+(cd "$bundle_dir" && make -j -f ../../cmpl_clang.mak \
+  PLATFORM=x64 O=b/m_x64 IS_X64=1 \
+  MY_ARCH='-arch x86_64 -Wno-poison-system-directories')
+
+arm64_binary="$bundle_dir/b/m_arm64/7zz"
+x86_64_binary="$bundle_dir/b/m_x64/7zz"
+for built_binary in "$arm64_binary" "$x86_64_binary"; do
+  if [ ! -x "$built_binary" ]; then
+    printf 'The build completed but %s was not found.\n' "$built_binary" >&2
     exit 1
-    ;;
-esac
-
-(cd "$bundle_dir" && make -j -f "$makefile")
-
-built_binary=$(find "$bundle_dir" -type f -name 7zz -perm +111 -print | head -n 1)
-if [ -z "$built_binary" ]; then
-  printf 'The build completed but no 7zz executable was found.\n' >&2
-  exit 1
-fi
+  fi
+done
 
 destination="$project_dir/assets/sevenzip/7zz"
-cp "$built_binary" "$destination"
+lipo -create "$arm64_binary" "$x86_64_binary" -output "$destination"
 chmod 755 "$destination"
+lipo "$destination" -verify_arch arm64 x86_64
 "$destination" i >/dev/null
 
 mkdir -p "$project_dir/assets/sevenzip/licenses"
@@ -37,4 +31,4 @@ cp "$project_dir/third_party/7zip/licenses/License.txt" "$project_dir/assets/sev
 cp "$project_dir/third_party/7zip/licenses/copying.txt" "$project_dir/assets/sevenzip/licenses/LGPL-2.1.txt"
 cp "$project_dir/third_party/7zip/licenses/unRarLicense.txt" "$project_dir/assets/sevenzip/licenses/unRAR-License.txt"
 
-printf 'Built %s 7zz at %s\n' "$architecture" "$destination"
+printf 'Built universal arm64/x86_64 7zz at %s\n' "$destination"

@@ -229,6 +229,60 @@ void main() {
     }
   }, skip: skip ? 'Build assets/sevenzip/7zz first.' : false);
 
+  test(
+    'keeps ZIP Deflate and preserves macOS symbolic links',
+    () async {
+      final temporary = await Directory.systemTemp.createTemp(
+        'jucier-macos-links-e2e-',
+      );
+      addTearDown(() => temporary.delete(recursive: true));
+
+      final source = Directory(p.join(temporary.path, 'source'));
+      await source.create();
+      final payload = File(p.join(source.path, 'payload.txt'));
+      await payload.writeAsString('compressible payload\n' * 8192);
+      await Link(p.join(source.path, 'payload-link.txt')).create('payload.txt');
+
+      final archive = p.join(temporary.path, 'links.zip');
+      final output = p.join(temporary.path, 'output');
+      final engine = SevenZipEngine(executablePath: executable);
+      await engine.create(
+        CreateArchiveOptions(
+          archivePath: archive,
+          sources: [source.path],
+          format: ArchiveFormat.zip,
+        ),
+      );
+
+      final listing = await engine.list(archive);
+      final payloadEntry = listing.entries.singleWhere(
+        (entry) => entry.path == 'source/payload.txt',
+      );
+      final linkEntry = listing.entries.singleWhere(
+        (entry) => entry.path == 'source/payload-link.txt',
+      );
+      expect(payloadEntry.method, 'Deflate');
+      expect(linkEntry.attributes, contains('l'));
+
+      await engine.extract(
+        ExtractArchiveOptions(archivePath: archive, outputDirectory: output),
+      );
+      final extractedLink = p.join(output, 'source', 'payload-link.txt');
+      expect(
+        await FileSystemEntity.type(extractedLink, followLinks: false),
+        FileSystemEntityType.link,
+      );
+      expect(await Link(extractedLink).target(), 'payload.txt');
+      expect(
+        await File(extractedLink).readAsString(),
+        await payload.readAsString(),
+      );
+    },
+    skip: skip || !Platform.isMacOS
+        ? 'Requires the bundled macOS 7-Zip engine.'
+        : false,
+  );
+
   test('adds dropped files and folders to an archive subdirectory', () async {
     final temporary = await Directory.systemTemp.createTemp(
       'jucier-add-entries-e2e-',

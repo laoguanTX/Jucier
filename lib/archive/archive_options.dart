@@ -7,14 +7,21 @@ enum ArchiveFormat {
     sevenZipType: 'zip',
     extension: 'zip',
     supportsPassword: true,
+    supportsSymbolicLinks: true,
   ),
   sevenZip(
     label: '7Z',
     sevenZipType: '7z',
     extension: '7z',
     supportsPassword: true,
+    supportsSymbolicLinks: true,
   ),
-  tar(label: 'TAR', sevenZipType: 'tar', extension: 'tar'),
+  tar(
+    label: 'TAR',
+    sevenZipType: 'tar',
+    extension: 'tar',
+    supportsSymbolicLinks: true,
+  ),
   gzip(
     label: 'GZIP',
     sevenZipType: 'gzip',
@@ -28,7 +35,12 @@ enum ArchiveFormat {
     extension: 'bz2',
     singleSourceOnly: true,
   ),
-  wim(label: 'WIM', sevenZipType: 'wim', extension: 'wim');
+  wim(
+    label: 'WIM',
+    sevenZipType: 'wim',
+    extension: 'wim',
+    supportsSymbolicLinks: true,
+  );
 
   const ArchiveFormat({
     required this.label,
@@ -36,6 +48,7 @@ enum ArchiveFormat {
     required this.extension,
     this.supportsPassword = false,
     this.singleSourceOnly = false,
+    this.supportsSymbolicLinks = false,
   });
 
   final String label;
@@ -43,6 +56,7 @@ enum ArchiveFormat {
   final String extension;
   final bool supportsPassword;
   final bool singleSourceOnly;
+  final bool supportsSymbolicLinks;
 }
 
 enum ExtractionConflict {

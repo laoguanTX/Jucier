@@ -34,10 +34,26 @@ class ArchiveListing {
     required this.entries,
     this.type,
     this.physicalSize,
+    this.method,
+    this.solid,
+    this.blocks,
   });
+
+  String get detectedType =>
+      (type ?? p.extension(archivePath).replaceFirst('.', '')).toLowerCase();
+  bool get isSplit => RegExp(r'\.[0-9]{3,}$').hasMatch(archivePath);
+  bool get canUpdate =>
+      !isSplit && const {'7z', 'zip', 'tar', 'wim'}.contains(detectedType);
+  bool get canOptimize =>
+      canUpdate &&
+      detectedType == '7z' &&
+      (method?.toUpperCase().contains('LZMA2') ?? false);
 
   final String archivePath;
   final List<ArchiveEntry> entries;
   final String? type;
   final int? physicalSize;
+  final String? method;
+  final bool? solid;
+  final int? blocks;
 }

@@ -125,6 +125,32 @@ void main() {
     expect(formatCompressionRatio(0, 0), '—');
   });
 
+  test('entry index reuses normalized hierarchy and precomputed totals', () {
+    const entries = [
+      ArchiveEntry(path: r'/Small\a.txt', isDirectory: false, size: 5),
+      ArchiveEntry(path: 'Large/a.txt', isDirectory: false, size: 20),
+      ArchiveEntry(path: 'Large//Sub/b.txt', isDirectory: false, size: 30),
+    ];
+    final index = ArchiveEntryIndex(entries);
+
+    expect(index.containsEntry(r'Small\a.txt'), isTrue);
+    expect(index.visibleEntries('Small').single.path, 'Small/a.txt');
+    expect(index.directoryStats('Large').itemCount, 2);
+    expect(index.directoryStats('Large/').totalSize, 50);
+    expect(
+      index
+          .visibleEntries(
+            '',
+            sort: const ArchiveSort(
+              column: ArchiveSortColumn.totalSize,
+              direction: ArchiveSortDirection.descending,
+            ),
+          )
+          .map((entry) => entry.name),
+      ['Large', 'Small'],
+    );
+  });
+
   testWidgets('compose mode starts with an importable file tree', (
     tester,
   ) async {

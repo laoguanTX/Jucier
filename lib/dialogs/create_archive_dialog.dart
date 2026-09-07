@@ -99,6 +99,8 @@ class _CreateArchiveFormState extends State<_CreateArchiveForm> {
   _VolumeUnit _volumeUnit = _VolumeUnit.megabytes;
   bool _advancedExpanded = false;
   double _level = 5;
+  CompressionPreset _preset = CompressionPreset.balanced;
+  ZipEncryption _zipEncryption = ZipEncryption.aes256;
   String? _error;
 
   @override
@@ -285,6 +287,49 @@ class _CreateArchiveFormState extends State<_CreateArchiveForm> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    Text('压缩用途', style: smallTitleStyle),
+                    const SizedBox(height: 6),
+                    FSelect<CompressionPreset>(
+                      key: const ValueKey('compression-preset'),
+                      control: FSelectControl.lifted(
+                        value: _preset,
+                        onChange: (value) {
+                          if (value != null) {
+                            setState(() {
+                              _preset = value;
+                              _level = value.level.toDouble();
+                            });
+                          }
+                        },
+                      ),
+                      items: {
+                        for (final preset in CompressionPreset.values)
+                          preset.label: preset,
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                    if (_format == ArchiveFormat.zip) ...[
+                      Text('密码加密方式', style: smallTitleStyle),
+                      const SizedBox(height: 6),
+                      FSelect<ZipEncryption>(
+                        key: const ValueKey('zip-encryption'),
+                        control: FSelectControl.lifted(
+                          value: _zipEncryption,
+                          onChange: (value) {
+                            if (value != null) {
+                              setState(() => _zipEncryption = value);
+                            }
+                          },
+                        ),
+                        items: {
+                          for (final encryption in ZipEncryption.values)
+                            encryption.label: encryption,
+                        },
+                      ),
+                      const SizedBox(height: 6),
+                      const Text('AES-256 需要接收方使用支持此加密方式的解压软件。'),
+                      const SizedBox(height: 12),
+                    ],
                     Text(
                       '分卷大小',
                       key: const ValueKey('volume-size-title'),
@@ -378,13 +423,19 @@ class _CreateArchiveFormState extends State<_CreateArchiveForm> {
       ],
       confirmButtonText: '保存',
     );
-    if (location != null) setState(() => _pathController.text = location.path);
+    if (location != null && mounted) {
+      setState(() => _pathController.text = location.path);
+    }
   }
 
   void _changeFormat(ArchiveFormat? format) {
     if (format == null) return;
     setState(() {
-      final withoutExtension = p.withoutExtension(_pathController.text);
+      final current = _pathController.text;
+      final suffix = '.${_format.extension}';
+      final withoutExtension = current.endsWith(suffix)
+          ? current.substring(0, current.length - suffix.length)
+          : p.withoutExtension(current);
       _format = format;
       if (!format.supportsPassword) {
         _passwordController.clear();
@@ -403,12 +454,19 @@ class _CreateArchiveFormState extends State<_CreateArchiveForm> {
       setState(() => _error = '${_format.label} 一次只能压缩一个文件');
       return;
     }
+    final volume = _volumeController.text.trim();
+    if (volume.isNotEmpty && !RegExp(r'^[1-9][0-9]*$').hasMatch(volume)) {
+      setState(() => _error = '分卷大小必须是大于零的整数');
+      return;
+    }
     Navigator.of(context).pop(
       CreateArchiveOptions(
         archivePath: path,
         sources: widget.sources,
         format: _format,
         compressionLevel: _level.round(),
+        preset: _preset,
+        zipEncryption: _zipEncryption,
         password: _passwordController.text.trim().isEmpty
             ? null
             : _passwordController.text,

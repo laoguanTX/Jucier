@@ -35,6 +35,8 @@ enum ArchiveFormat {
     extension: 'bz2',
     singleSourceOnly: true,
   ),
+  tarGzip(label: 'TAR.GZ', sevenZipType: 'gzip', extension: 'tar.gz'),
+  tarXz(label: 'TAR.XZ', sevenZipType: 'xz', extension: 'tar.xz'),
   wim(
     label: 'WIM',
     sevenZipType: 'wim',
@@ -50,6 +52,8 @@ enum ArchiveFormat {
     this.singleSourceOnly = false,
     this.supportsSymbolicLinks = false,
   });
+
+  bool get usesTarContainer => this == tarGzip || this == tarXz;
 
   final String label;
   final String sevenZipType;
@@ -70,12 +74,35 @@ enum ExtractionConflict {
   final String switchValue;
 }
 
+enum CompressionPreset {
+  balanced('日常压缩', 5),
+  fast('快速打包', 1),
+  compact('更小体积', 7),
+  editable('经常预览与修改', 5);
+
+  const CompressionPreset(this.label, this.level);
+  final String label;
+  final int level;
+}
+
+enum ZipEncryption {
+  aes256('AES-256 加密', 'AES256'),
+  compatible('传统 ZIP 加密（兼容旧软件）', 'ZipCrypto');
+
+  const ZipEncryption(this.label, this.method);
+  final String label;
+  final String method;
+}
+
 class CreateArchiveOptions {
   const CreateArchiveOptions({
     required this.archivePath,
     required this.sources,
     required this.format,
     this.compressionLevel = 5,
+    this.preset = CompressionPreset.balanced,
+    this.zipEncryption = ZipEncryption.aes256,
+    this.maxThreads,
     this.password,
     this.volumeSize,
   });
@@ -84,6 +111,9 @@ class CreateArchiveOptions {
   final List<String> sources;
   final ArchiveFormat format;
   final int compressionLevel;
+  final CompressionPreset preset;
+  final ZipEncryption zipEncryption;
+  final int? maxThreads;
   final String? password;
   final String? volumeSize;
 }
@@ -111,6 +141,7 @@ class ExtractEntriesOptions {
     this.conflict = ExtractionConflict.overwrite,
     this.withoutParentDirectories = false,
     this.selectedEntryPath,
+    this.selectedEntryPaths = const [],
     this.outputPath,
   });
 
@@ -121,6 +152,7 @@ class ExtractEntriesOptions {
   final ExtractionConflict conflict;
   final bool withoutParentDirectories;
   final String? selectedEntryPath;
+  final List<String> selectedEntryPaths;
   final String? outputPath;
 }
 
@@ -130,10 +162,12 @@ class AddEntriesOptions {
     required this.sources,
     required this.destinationDirectory,
     this.password,
+    this.recompress = false,
   });
 
   final String archivePath;
   final List<String> sources;
   final String destinationDirectory;
+  final bool recompress;
   final String? password;
 }

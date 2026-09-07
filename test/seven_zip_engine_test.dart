@@ -8,6 +8,9 @@ void main() {
 Path = /tmp/example.7z
 Type = 7z
 Physical Size = 1450
+Method = LZMA2:24m
+Solid = +
+Blocks = 1
 
 Path = Documents
 Size = 0
@@ -33,6 +36,9 @@ Method = LZMA2:24 7zAES
 
       expect(listing.type, '7z');
       expect(listing.physicalSize, 1450);
+      expect(listing.method, 'LZMA2:24m');
+      expect(listing.solid, isTrue);
+      expect(listing.blocks, 1);
       expect(listing.entries, hasLength(2));
       expect(listing.entries.first.isDirectory, isTrue);
       expect(listing.entries.last.path, 'Documents/notes.txt');

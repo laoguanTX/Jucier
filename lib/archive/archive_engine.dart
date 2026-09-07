@@ -70,3 +70,13 @@ class ArchivePasswordRequiredException extends ArchiveException {
 class ArchiveCancelledException extends ArchiveException {
   const ArchiveCancelledException() : super('操作已取消', exitCode: 255);
 }
+
+/// Optional phase notifications without coupling the archive engine to widgets.
+abstract interface class ArchiveOperationEvents {
+  set onPhaseChanged(void Function(String phase)? callback);
+}
+
+class ArchiveWarningException extends ArchiveException {
+  const ArchiveWarningException({super.output})
+    : super('部分文件未处理，请查看详情并检查输出内容', exitCode: 1);
+}

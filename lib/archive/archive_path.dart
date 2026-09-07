@@ -13,5 +13,9 @@ String normalizeArchiveEntryPath(String entryPath) {
       segments.any((segment) => segment == '..')) {
     throw const ArchiveException('压缩包内包含不安全的文件路径');
   }
-  return p.posix.normalize(normalized);
+  final result = p.posix.normalize(normalized);
+  if (result == '.' || normalized.contains('\u0000')) {
+    throw const ArchiveException('压缩包内包含不安全的文件路径');
+  }
+  return result;
 }

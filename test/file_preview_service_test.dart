@@ -70,6 +70,45 @@ void main() {
     );
     expect(await session.file.readAsString(), 'flat preview');
   });
+  test('reuses a preview session and retries unsuccessful writeback', () async {
+    var attempts = 0;
+    var extractions = 0;
+    final service = FilePreviewService(
+      launcher: _FakeFileLauncher(),
+      pollInterval: const Duration(days: 1),
+      onChanged: (session) async {
+        attempts++;
+        if (attempts == 1) session.retryPendingChange();
+      },
+    );
+    addTearDown(service.dispose);
+    Future<void> extract(String directory) async {
+      extractions++;
+      await File(p.join(directory, 'sample.txt')).writeAsString('original');
+    }
+
+    final first = await service.open(
+      archivePath: '/tmp/sample.zip',
+      entryPath: 'sample.txt',
+      password: null,
+      extract: extract,
+    );
+    final second = await service.open(
+      archivePath: '/tmp/sample.zip',
+      entryPath: 'sample.txt',
+      password: null,
+      extract: extract,
+    );
+    expect(identical(first, second), isTrue);
+    expect(extractions, 1);
+    await first.file.writeAsString('changed');
+    await first.checkNow();
+    await first.checkNow();
+    await first.checkNow();
+    expect(attempts, 2);
+    await service.close(first);
+    expect(await first.file.exists(), isFalse);
+  });
 }
 
 class _FakeFileLauncher implements FileLauncher {

@@ -34,7 +34,7 @@ void main() {
     expect(find.text('创建压缩包'), findsOneWidget);
     // The archive format and volume unit selects each use a read-only
     // TextField internally.
-    expect(find.byType(TextField), findsNWidgets(5));
+    expect(find.byType(TextField), findsNWidgets(7));
     expect(find.text(' .zip'), findsOneWidget);
 
     final locationField = find.byKey(const ValueKey('save-location-field'));
@@ -117,6 +117,7 @@ void main() {
     expect(volumeDecoration?.labelText, isNull);
     expect(find.text('分卷大小'), findsOneWidget);
     expect(find.text('MB'), findsOneWidget);
+    await tester.ensureVisible(volumeUnit);
     await tester.tap(volumeUnit);
     await tester.pumpAndSettle();
     expect(find.text('KB'), findsOneWidget);
@@ -126,8 +127,12 @@ void main() {
     expect(find.text('GB'), findsOneWidget);
     expect(tester.takeException(), isNull);
 
+    await tester.ensureVisible(
+      find.byKey(const ValueKey('compression-password-title')),
+    );
     await tester.tap(find.byKey(const ValueKey('compression-password-title')));
     await tester.pumpAndSettle();
+    await tester.ensureVisible(volumeField);
     expect(volumeField.hitTestable(), findsOneWidget);
 
     expect(
@@ -225,6 +230,8 @@ void main() {
       ArchiveFormat.gzip,
       ArchiveFormat.xz,
       ArchiveFormat.bzip2,
+      ArchiveFormat.tarGzip,
+      ArchiveFormat.tarXz,
       ArchiveFormat.wim,
     ]);
   });

@@ -90,9 +90,6 @@ private class ArchiveFilePromiseDragSource: NSObject,
       finish()
     } else {
       finishIfPossible()
-      DispatchQueue.main.asyncAfter(deadline: .now() + 60) { [weak self] in
-        self?.finish()
-      }
     }
   }
 

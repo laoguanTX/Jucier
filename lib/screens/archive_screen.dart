@@ -42,6 +42,8 @@ class ArchiveScreen extends StatefulWidget {
     this.columns = defaultExtractionArchiveColumns,
     this.onImport,
     this.onCreate,
+    this.onOptimize,
+    this.onManagePreviews,
     super.key,
   });
 
@@ -61,6 +63,8 @@ class ArchiveScreen extends StatefulWidget {
   final List<ArchiveColumn> columns;
   final ArchiveImportCallback? onImport;
   final VoidCallback? onCreate;
+  final VoidCallback? onOptimize;
+  final VoidCallback? onManagePreviews;
 
   @override
   State<ArchiveScreen> createState() => _ArchiveScreenState();
@@ -69,6 +73,10 @@ class ArchiveScreen extends StatefulWidget {
 class _ArchiveScreenState extends State<ArchiveScreen> {
   String _directory = '';
   late List<double> _columnFractions;
+  late ArchiveEntryIndex _entryIndex;
+  bool _indexLoading = false;
+  String? _indexError;
+  int _indexGeneration = 0;
   ArchiveSort? _sort;
   bool _selectionMode = false;
   bool _draggingIntoArchive = false;
@@ -82,26 +90,56 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
   void initState() {
     super.initState();
     _columnFractions = _initialColumnFractions(_columns);
+    _replaceEntryIndex(widget.listing.entries);
+  }
+
+  void _replaceEntryIndex(List<ArchiveEntry> entries) {
+    final generation = ++_indexGeneration;
+    _indexError = null;
+    if (entries.length < 10000) {
+      _entryIndex = ArchiveEntryIndex(entries);
+      _indexLoading = false;
+      return;
+    }
+    _entryIndex = ArchiveEntryIndex(const []);
+    _indexLoading = true;
+    unawaited(
+      compute(_buildEntryIndex, entries).then(
+        (index) {
+          if (!mounted || generation != _indexGeneration) return;
+          setState(() {
+            _entryIndex = index;
+            _indexLoading = false;
+          });
+        },
+        onError: (Object error, StackTrace stack) {
+          if (!mounted || generation != _indexGeneration) return;
+          setState(() {
+            _indexLoading = false;
+            _indexError = '目录加载失败，请重新打开压缩包';
+          });
+        },
+      ),
+    );
   }
 
   @override
   void didUpdateWidget(covariant ArchiveScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (!identical(widget.listing.entries, oldWidget.listing.entries)) {
+      _replaceEntryIndex(widget.listing.entries);
+    }
     if (!listEquals(widget.columns, oldWidget.columns)) {
       _columnFractions = _initialColumnFractions(_columns);
       if (_sort != null && !_columns.contains(_sort!.column)) _sort = null;
     }
     if (widget.listing.archivePath != oldWidget.listing.archivePath) {
+      _directory = '';
       _selectionMode = false;
       _selectedEntries.clear();
-    } else {
-      final available = widget.listing.entries
-          .map((entry) => entry.path.replaceAll('\\', '/'))
-          .toSet();
+    } else if (!_indexLoading) {
       _selectedEntries.removeWhere(
-        (path, entry) =>
-            !entry.isDirectory &&
-            !available.contains(path.replaceAll('\\', '/')),
+        (path, entry) => !entry.isDirectory && !_entryIndex.containsEntry(path),
       );
     }
   }
@@ -110,11 +148,7 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
   Widget build(BuildContext context) {
     final composing = widget.mode == ArchiveScreenMode.compose;
     final colors = context.theme.colors;
-    final entries = visibleArchiveEntries(
-      widget.listing.entries,
-      _directory,
-      sort: _sort,
-    );
+    final entries = _entryIndex.visibleEntries(_directory, sort: _sort);
 
     final content = Column(
       children: [
@@ -215,7 +249,10 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
                   key: const ValueKey('archive-batch-delete'),
                   size: FButtonSizeVariant.sm,
                   variant: FButtonVariant.destructive,
-                  onPress: widget.enabled && _selectedEntries.isNotEmpty
+                  onPress:
+                      widget.enabled &&
+                          widget.listing.canUpdate &&
+                          _selectedEntries.isNotEmpty
                       ? () => _runBatch(widget.onDeleteEntries)
                       : null,
                   prefix: const Icon(FLucideIcons.trash2, size: 15),
@@ -229,7 +266,8 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
                   child: const Text('完成'),
                 ),
               ] else ...[
-                if (widget.onImport != null) ...[
+                if (widget.onImport != null &&
+                    (composing || widget.listing.canUpdate)) ...[
                   FButton(
                     key: const ValueKey('archive-import'),
                     size: FButtonSizeVariant.sm,
@@ -250,6 +288,26 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
                   child: const Text('测试'),
                 ),
                 const SizedBox(width: 6),
+                if (widget.onManagePreviews != null) ...[
+                  FButton.icon(
+                    size: FButtonSizeVariant.sm,
+                    variant: FButtonVariant.ghost,
+                    onPress: widget.enabled ? widget.onManagePreviews : null,
+                    semanticsLabel: '管理预览会话',
+                    child: const Icon(FLucideIcons.eye, size: 16),
+                  ),
+                  const SizedBox(width: 6),
+                ],
+                if (widget.onOptimize != null &&
+                    widget.listing.canOptimize) ...[
+                  FButton(
+                    size: FButtonSizeVariant.sm,
+                    variant: FButtonVariant.ghost,
+                    onPress: widget.enabled ? widget.onOptimize : null,
+                    child: const Text('整理'),
+                  ),
+                  const SizedBox(width: 6),
+                ],
                 FButton(
                   key: const ValueKey('archive-selection-toggle'),
                   size: FButtonSizeVariant.sm,
@@ -283,7 +341,12 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
           child: entries.isEmpty
               ? Center(
                   child: Text(
-                    composing ? '尚未导入文件' : '此文件夹为空',
+                    _indexError ??
+                        (_indexLoading
+                            ? '正在整理目录…'
+                            : composing
+                            ? '尚未导入文件'
+                            : '此文件夹为空'),
                     style: context.theme.typography.body.md.copyWith(
                       color: colors.mutedForeground,
                     ),
@@ -305,10 +368,7 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
                     final offset = _directory.isEmpty ? index : index - 1;
                     final entry = entries[offset];
                     final directoryStats = entry.isDirectory
-                        ? archiveDirectoryStats(
-                            widget.listing.entries,
-                            entry.path,
-                          )
+                        ? _entryIndex.directoryStats(entry.path)
                         : null;
                     return _ArchiveRow(
                       name: entry.name,
@@ -337,13 +397,16 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
                                   ? entry.name
                                   : '$_directory/${entry.name}';
                             })
-                          : composing
+                          : composing || !widget.enabled
                           ? null
                           : () => widget.onPreviewEntry(entry),
-                      onExtract: composing
+                      onExtract: composing || !widget.enabled
                           ? null
                           : () => widget.onExtractEntry(entry),
-                      onDelete: composing
+                      onDelete:
+                          composing ||
+                              !widget.enabled ||
+                              !widget.listing.canUpdate
                           ? null
                           : () => widget.onDeleteEntry(entry),
                       onDragStarted: widget.enabled && !composing
@@ -370,7 +433,10 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
       ],
     );
     return DropTarget(
-      enable: widget.enabled && !_draggingEntriesOut,
+      enable:
+          widget.enabled &&
+          !_draggingEntriesOut &&
+          (composing || widget.listing.canUpdate),
       onDragEntered: (_) {
         if (_draggingEntriesOut) return;
         setState(() => _draggingIntoArchive = true);
@@ -1199,134 +1265,186 @@ class ArchiveSort {
   final ArchiveSortDirection direction;
 }
 
+/// Precomputes the archive hierarchy and directory totals in one pass.
+///
+/// The same index serves navigation, sorting, selection reconciliation, and
+/// row rendering without repeatedly normalizing paths or rescanning all files.
+class ArchiveEntryIndex {
+  ArchiveEntryIndex(List<ArchiveEntry> entries) {
+    final mutableStats = <String, _MutableArchiveDirectoryStats>{};
+    for (final entry in entries) {
+      final normalizedPath = _normalizeArchiveDisplayPath(entry.path);
+      if (normalizedPath.isEmpty) continue;
+
+      _entryPaths.add(normalizedPath);
+      final segments = normalizedPath.split('/');
+      var parent = '';
+      for (var index = 0; index < segments.length; index++) {
+        final name = segments[index];
+        if (name.isEmpty) continue;
+        final path = parent.isEmpty ? name : '$parent/$name';
+        final children = _childrenByDirectory.putIfAbsent(parent, () => {});
+        if (index == segments.length - 1) {
+          children[name] = _copyEntryWithPath(entry, normalizedPath);
+        } else {
+          children.putIfAbsent(
+            name,
+            () => ArchiveEntry(path: path, isDirectory: true),
+          );
+          parent = path;
+        }
+      }
+
+      if (entry.isDirectory) continue;
+      var directory = '';
+      for (var index = 0; index < segments.length - 1; index++) {
+        directory = directory.isEmpty
+            ? segments[index]
+            : '$directory/${segments[index]}';
+        final stats = mutableStats.putIfAbsent(
+          directory,
+          _MutableArchiveDirectoryStats.new,
+        );
+        stats
+          ..itemCount += 1
+          ..totalSize += entry.size ?? 0;
+      }
+    }
+    for (final MapEntry(key: path, value: stats) in mutableStats.entries) {
+      _directoryStats[path] = ArchiveDirectoryStats(
+        totalSize: stats.totalSize,
+        itemCount: stats.itemCount,
+      );
+    }
+  }
+
+  final Map<String, Map<String, ArchiveEntry>> _childrenByDirectory = {};
+  final Map<String, ArchiveDirectoryStats> _directoryStats = {};
+  final Set<String> _entryPaths = {};
+  final Map<String, String> _nameSortKeys = {};
+  final Map<(String, ArchiveColumn?, ArchiveSortDirection?), List<ArchiveEntry>>
+  _sortedEntries = {};
+
+  bool containsEntry(String path) =>
+      _entryPaths.contains(_normalizeArchiveDisplayPath(path));
+
+  ArchiveDirectoryStats directoryStats(String directoryPath) =>
+      _directoryStats[_normalizeArchiveDisplayPath(directoryPath)] ??
+      const ArchiveDirectoryStats(totalSize: 0, itemCount: 0);
+
+  List<ArchiveEntry> visibleEntries(String directory, {ArchiveSort? sort}) {
+    final normalizedDirectory = _normalizeArchiveDisplayPath(directory);
+    final key = (normalizedDirectory, sort?.column, sort?.direction);
+    final cached = _sortedEntries[key];
+    if (cached != null) return cached;
+    final visible = List<ArchiveEntry>.of(
+      _childrenByDirectory[normalizedDirectory]?.values ?? const [],
+    );
+
+    int compareNames(ArchiveEntry a, ArchiveEntry b) {
+      final aKey = _nameSortKeys.putIfAbsent(
+        a.name,
+        () => _pinyinSortKey(a.name),
+      );
+      final bKey = _nameSortKeys.putIfAbsent(
+        b.name,
+        () => _pinyinSortKey(b.name),
+      );
+      final byPinyin = aKey.compareTo(bKey);
+      if (byPinyin != 0) return byPinyin;
+      return a.name.toLowerCase().compareTo(b.name.toLowerCase());
+    }
+
+    int compareDefault(ArchiveEntry a, ArchiveEntry b) {
+      if (a.isDirectory != b.isDirectory) return a.isDirectory ? -1 : 1;
+      return compareNames(a, b);
+    }
+
+    int compareSorted(ArchiveEntry a, ArchiveEntry b) {
+      ArchiveDirectoryStats? statsFor(ArchiveEntry entry) =>
+          entry.isDirectory ? directoryStats(entry.path) : null;
+      final primary = switch (sort!.column) {
+        ArchiveSortColumn.name => compareNames(a, b),
+        ArchiveSortColumn.type => archiveEntryType(
+          a.name,
+          a.isDirectory,
+        ).compareTo(archiveEntryType(b.name, b.isDirectory)),
+        ArchiveSortColumn.path => a.path.compareTo(b.path),
+        ArchiveSortColumn.size => _compareNullable(
+          a.size,
+          b.size,
+          (left, right) => left.compareTo(right),
+        ),
+        ArchiveSortColumn.totalSize => _compareNullable(
+          statsFor(a)?.totalSize,
+          statsFor(b)?.totalSize,
+          (left, right) => left.compareTo(right),
+        ),
+        ArchiveSortColumn.itemCount => _compareNullable(
+          statsFor(a)?.itemCount,
+          statsFor(b)?.itemCount,
+          (left, right) => left.compareTo(right),
+        ),
+        ArchiveSortColumn.packedSize => _compareNullable(
+          a.packedSize,
+          b.packedSize,
+          (left, right) => left.compareTo(right),
+        ),
+        ArchiveSortColumn.compressionRatio => _compareNullable(
+          compressionRatio(a.size, a.packedSize),
+          compressionRatio(b.size, b.packedSize),
+          (left, right) => left.compareTo(right),
+        ),
+        ArchiveSortColumn.modified => _compareNullable(
+          a.modified,
+          b.modified,
+          (left, right) => left.compareTo(right),
+        ),
+        ArchiveSortColumn.method => _compareNullable(
+          a.method,
+          b.method,
+          (left, right) => left.compareTo(right),
+        ),
+        ArchiveSortColumn.encrypted => _compareNullable(
+          a.encrypted,
+          b.encrypted,
+          (left, right) => (left ? 1 : 0).compareTo(right ? 1 : 0),
+        ),
+        ArchiveSortColumn.crc => _compareNullable(
+          a.crc,
+          b.crc,
+          (left, right) => left.compareTo(right),
+        ),
+        ArchiveSortColumn.sourcePath => _compareNullable(
+          a.sourcePath,
+          b.sourcePath,
+          (left, right) => left.compareTo(right),
+        ),
+        ArchiveSortColumn.attributes => _compareNullable(
+          a.attributes,
+          b.attributes,
+          (left, right) => left.compareTo(right),
+        ),
+      };
+      final result = primary == 0 ? compareNames(a, b) : primary;
+      return sort.direction == ArchiveSortDirection.ascending
+          ? result
+          : -result;
+    }
+
+    visible.sort(sort == null ? compareDefault : compareSorted);
+    if (_sortedEntries.length >= 32) {
+      _sortedEntries.remove(_sortedEntries.keys.first);
+    }
+    return _sortedEntries[key] = List.unmodifiable(visible);
+  }
+}
+
 List<ArchiveEntry> visibleArchiveEntries(
   List<ArchiveEntry> all,
   String directory, {
   ArchiveSort? sort,
-}) {
-  final prefix = directory.isEmpty ? '' : '$directory/';
-  final visible = <String, ArchiveEntry>{};
-  for (final entry in all) {
-    final normalized = entry.path
-        .replaceAll('\\', '/')
-        .replaceFirst(RegExp(r'^/+'), '');
-    if (!normalized.startsWith(prefix)) continue;
-    final relative = normalized.substring(prefix.length);
-    if (relative.isEmpty) continue;
-    final slash = relative.indexOf('/');
-    if (slash >= 0) {
-      final name = relative.substring(0, slash);
-      visible.putIfAbsent(
-        name,
-        () => ArchiveEntry(path: '$prefix$name', isDirectory: true),
-      );
-    } else {
-      visible[relative] = ArchiveEntry(
-        path: normalized,
-        isDirectory: entry.isDirectory,
-        size: entry.size,
-        packedSize: entry.packedSize,
-        modified: entry.modified,
-        crc: entry.crc,
-        method: entry.method,
-        encrypted: entry.encrypted,
-        sourcePath: entry.sourcePath,
-        attributes: entry.attributes,
-      );
-    }
-  }
-  final nameKeys = <String, String>{};
-  final directoryStats = <String, ArchiveDirectoryStats>{};
-  ArchiveDirectoryStats? statsFor(ArchiveEntry entry) => entry.isDirectory
-      ? directoryStats.putIfAbsent(
-          entry.path,
-          () => archiveDirectoryStats(all, entry.path),
-        )
-      : null;
-  int compareNames(ArchiveEntry a, ArchiveEntry b) {
-    final aKey = nameKeys.putIfAbsent(a.name, () => _pinyinSortKey(a.name));
-    final bKey = nameKeys.putIfAbsent(b.name, () => _pinyinSortKey(b.name));
-    final byPinyin = aKey.compareTo(bKey);
-    if (byPinyin != 0) return byPinyin;
-    return a.name.toLowerCase().compareTo(b.name.toLowerCase());
-  }
-
-  int compareDefault(ArchiveEntry a, ArchiveEntry b) {
-    if (a.isDirectory != b.isDirectory) return a.isDirectory ? -1 : 1;
-    return compareNames(a, b);
-  }
-
-  int compareSorted(ArchiveEntry a, ArchiveEntry b) {
-    final primary = switch (sort!.column) {
-      ArchiveSortColumn.name => compareNames(a, b),
-      ArchiveSortColumn.type => archiveEntryType(
-        a.name,
-        a.isDirectory,
-      ).compareTo(archiveEntryType(b.name, b.isDirectory)),
-      ArchiveSortColumn.path => a.path.compareTo(b.path),
-      ArchiveSortColumn.size => _compareNullable(
-        a.size,
-        b.size,
-        (left, right) => left.compareTo(right),
-      ),
-      ArchiveSortColumn.totalSize => _compareNullable(
-        statsFor(a)?.totalSize,
-        statsFor(b)?.totalSize,
-        (left, right) => left.compareTo(right),
-      ),
-      ArchiveSortColumn.itemCount => _compareNullable(
-        statsFor(a)?.itemCount,
-        statsFor(b)?.itemCount,
-        (left, right) => left.compareTo(right),
-      ),
-      ArchiveSortColumn.packedSize => _compareNullable(
-        a.packedSize,
-        b.packedSize,
-        (left, right) => left.compareTo(right),
-      ),
-      ArchiveSortColumn.compressionRatio => _compareNullable(
-        compressionRatio(a.size, a.packedSize),
-        compressionRatio(b.size, b.packedSize),
-        (left, right) => left.compareTo(right),
-      ),
-      ArchiveSortColumn.modified => _compareNullable(
-        a.modified,
-        b.modified,
-        (left, right) => left.compareTo(right),
-      ),
-      ArchiveSortColumn.method => _compareNullable(
-        a.method,
-        b.method,
-        (left, right) => left.compareTo(right),
-      ),
-      ArchiveSortColumn.encrypted => _compareNullable(
-        a.encrypted,
-        b.encrypted,
-        (left, right) => (left ? 1 : 0).compareTo(right ? 1 : 0),
-      ),
-      ArchiveSortColumn.crc => _compareNullable(
-        a.crc,
-        b.crc,
-        (left, right) => left.compareTo(right),
-      ),
-      ArchiveSortColumn.sourcePath => _compareNullable(
-        a.sourcePath,
-        b.sourcePath,
-        (left, right) => left.compareTo(right),
-      ),
-      ArchiveSortColumn.attributes => _compareNullable(
-        a.attributes,
-        b.attributes,
-        (left, right) => left.compareTo(right),
-      ),
-    };
-    final result = primary == 0 ? compareNames(a, b) : primary;
-    return sort.direction == ArchiveSortDirection.ascending ? result : -result;
-  }
-
-  return visible.values.toList()
-    ..sort(sort == null ? compareDefault : compareSorted);
-}
+}) => ArchiveEntryIndex(all).visibleEntries(directory, sort: sort);
 
 class ArchiveDirectoryStats {
   const ArchiveDirectoryStats({
@@ -1341,24 +1459,36 @@ class ArchiveDirectoryStats {
 ArchiveDirectoryStats archiveDirectoryStats(
   List<ArchiveEntry> entries,
   String directoryPath,
-) {
-  final normalizedDirectory = directoryPath
-      .replaceAll('\\', '/')
-      .replaceFirst(RegExp(r'^/+'), '')
-      .replaceFirst(RegExp(r'/+$'), '');
-  final prefix = '$normalizedDirectory/';
-  var totalSize = 0;
-  var itemCount = 0;
-  for (final entry in entries) {
-    final path = entry.path
-        .replaceAll('\\', '/')
-        .replaceFirst(RegExp(r'^/+'), '');
-    if (entry.isDirectory || !path.startsWith(prefix)) continue;
-    itemCount++;
-    totalSize += entry.size ?? 0;
-  }
-  return ArchiveDirectoryStats(totalSize: totalSize, itemCount: itemCount);
+) => ArchiveEntryIndex(entries).directoryStats(directoryPath);
+
+class _MutableArchiveDirectoryStats {
+  int totalSize = 0;
+  int itemCount = 0;
 }
+
+final RegExp _repeatedArchiveSeparators = RegExp(r'/+');
+final RegExp _leadingArchiveSeparator = RegExp(r'^/');
+final RegExp _trailingArchiveSeparator = RegExp(r'/$');
+
+String _normalizeArchiveDisplayPath(String path) => path
+    .replaceAll('\\', '/')
+    .replaceAll(_repeatedArchiveSeparators, '/')
+    .replaceFirst(_leadingArchiveSeparator, '')
+    .replaceFirst(_trailingArchiveSeparator, '');
+
+ArchiveEntry _copyEntryWithPath(ArchiveEntry entry, String path) =>
+    ArchiveEntry(
+      path: path,
+      isDirectory: entry.isDirectory,
+      size: entry.size,
+      packedSize: entry.packedSize,
+      modified: entry.modified,
+      crc: entry.crc,
+      method: entry.method,
+      encrypted: entry.encrypted,
+      sourcePath: entry.sourcePath,
+      attributes: entry.attributes,
+    );
 
 String archiveEntryType(String name, bool isDirectory) {
   if (isDirectory) return '文件夹';
@@ -1425,4 +1555,16 @@ String formatDate(DateTime? value) {
   if (value == null) return '—';
   String two(int number) => number.toString().padLeft(2, '0');
   return '${value.year}-${two(value.month)}-${two(value.day)} ${two(value.hour)}:${two(value.minute)}';
+}
+
+ArchiveEntryIndex _buildEntryIndex(List<ArchiveEntry> entries) {
+  final index = ArchiveEntryIndex(entries);
+  final largeDirectories = index._childrenByDirectory.entries
+      .where((entry) => entry.value.length >= 2000)
+      .take(16);
+  for (final directory in largeDirectories) {
+    index.visibleEntries(directory.key);
+  }
+  index.visibleEntries('');
+  return index;
 }

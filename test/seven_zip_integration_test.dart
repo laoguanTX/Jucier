@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:math';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jucier/archive/archive_engine.dart';
@@ -306,6 +307,7 @@ void main() {
     final addedFolder = Directory(p.join(temporary.path, 'DroppedFolder'));
     await addedFolder.create();
     await File(p.join(addedFolder.path, 'child.txt')).writeAsString('child');
+    await Link(p.join(addedFolder.path, 'child-link.txt')).create('child.txt');
 
     await engine.addEntries(
       AddEntriesOptions(
@@ -320,7 +322,17 @@ void main() {
       containsAll([
         'Current/Inner/added.txt',
         'Current/Inner/DroppedFolder/child.txt',
+        'Current/Inner/DroppedFolder/child-link.txt',
       ]),
+    );
+    expect(
+      listing.entries
+          .singleWhere(
+            (entry) =>
+                entry.path == 'Current/Inner/DroppedFolder/child-link.txt',
+          )
+          .attributes,
+      contains('l'),
     );
 
     final output = p.join(temporary.path, 'output');
@@ -338,5 +350,65 @@ void main() {
       ).readAsString(),
       'child',
     );
+    final extractedLink = p.join(
+      output,
+      'Current',
+      'Inner',
+      'DroppedFolder',
+      'child-link.txt',
+    );
+    expect(
+      await FileSystemEntity.type(extractedLink, followLinks: false),
+      FileSystemEntityType.link,
+    );
+  }, skip: skip ? 'Build assets/sevenzip/7zz first.' : false);
+
+  test('recompacts 7z archives after repeated additions', () async {
+    final temporary = await Directory.systemTemp.createTemp(
+      'jucier-7z-compaction-e2e-',
+    );
+    addTearDown(() => temporary.delete(recursive: true));
+
+    final random = Random(42);
+    final bytes = List<int>.generate(
+      256 * 1024,
+      (_) => random.nextInt(256),
+      growable: false,
+    );
+    final first = File(p.join(temporary.path, 'part-0.bin'));
+    await first.writeAsBytes(bytes, flush: true);
+    final archive = p.join(temporary.path, 'compact.7z');
+    final engine = SevenZipEngine(executablePath: executable);
+    await engine.create(
+      CreateArchiveOptions(
+        archivePath: archive,
+        sources: [first.path],
+        format: ArchiveFormat.sevenZip,
+      ),
+    );
+
+    for (var index = 1; index < 5; index++) {
+      final next = File(p.join(temporary.path, 'part-$index.bin'));
+      await next.writeAsBytes(bytes, flush: true);
+      await engine.addEntries(
+        AddEntriesOptions(
+          archivePath: archive,
+          sources: [next.path],
+          destinationDirectory: '',
+          recompress: true,
+        ),
+      );
+    }
+
+    final listing = await engine.list(archive);
+    expect(listing.entries.where((entry) => !entry.isDirectory), hasLength(5));
+    expect(listing.solid, isTrue);
+    expect(listing.blocks, 1);
+    expect(
+      await File(archive).length(),
+      lessThan(bytes.length * 2),
+      reason: 'Repeated additions should not leave one LZMA2 block per file.',
+    );
+    await engine.test(archive);
   }, skip: skip ? 'Build assets/sevenzip/7zz first.' : false);
 }

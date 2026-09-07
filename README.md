@@ -18,8 +18,10 @@ visible in a compact footer.
 ## Current features
 
 - Browse 7-Zip's supported archive formats with nested folder navigation.
-- Create 7z, ZIP, TAR, and GZIP archives.
-- Passwords, compression levels, split volumes, and encrypted 7z headers.
+- Create ZIP, 7z, TAR, GZIP, XZ, BZIP2, WIM, TAR.GZ, and TAR.XZ archives.
+- Compression presets, explicit ZIP AES-256/legacy encryption, split volumes, and encrypted 7z headers.
+- Fast incremental additions and an explicit 7z optimization action.
+- Verified replacement of existing archives, exact member selection, cancellable staging, and batched extraction.
 - Extract with overwrite, skip, or automatic rename conflict behavior.
 - Test archive integrity, show progress, and cancel the active operation.
 - Drag and drop plus native macOS open/save panels.
@@ -60,3 +62,36 @@ flutter test
 7-Zip's redistributed license files are copied to
 `third_party/7zip/licenses` by the download script and must be included with
 release artifacts.
+
+## Archive operation behavior
+
+- Creating at an existing path replaces the old contents after building and testing
+  the replacement. Old numbered volumes are removed as part of publication;
+  failures before publication leave the original intact. Publication rolls back
+  on ordinary filesystem errors. A multi-volume replacement is not atomic across
+  a power failure or process termination.
+- Adding files uses incremental updates. The **整理** action explicitly rebuilds
+  compatible 7z archives with standard level 5 and solid compression. It needs
+  temporary space for the unpacked contents; unchanged entries are checked before
+  the original is replaced.
+- ZIP passwords default to AES-256. Choose legacy ZIP encryption in advanced
+  options only when the receiving software requires it. Existing encrypted data
+  is checked before modifying an encrypted archive.
+- Selected-only extraction decodes a batch once, preserves safe relative symbolic
+  links, and refuses to merge through links already in the destination. Conflicting
+  directories are not recursively deleted to replace them with a file.
+- GZIP/XZ/BZIP2 accept one regular file. Use TAR.GZ or TAR.XZ for directories.
+- Preview sessions are reused and can be closed from the eye button in the archive
+  toolbar. Save changes into the archive before closing a session.
+
+## Repeatable performance sample
+
+```sh
+dart run tool/benchmark_archives.dart
+```
+
+This creates temporary synthetic files and compares incremental additions with
+recompression, and batched extraction with separate extractions. It also parses a
+100,000-member synthetic listing. Output is JSON; timings include process startup
+and are a warm-cache local sample, not a guarantee for other datasets. The temporary
+files are removed when the benchmark finishes.

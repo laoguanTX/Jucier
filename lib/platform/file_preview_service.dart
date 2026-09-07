@@ -36,13 +36,18 @@ class FilePreviewService {
     required this.launcher,
     required this.onChanged,
     this.pollInterval = const Duration(milliseconds: 750),
+    this.maxSessions = 32,
   });
 
   final FileLauncher launcher;
   final PreviewChangedCallback onChanged;
   final Duration pollInterval;
+  final int maxSessions;
   final List<PreviewSession> _sessions = [];
   bool _disposed = false;
+
+  List<PreviewSession> get sessions =>
+      List.unmodifiable(_sessions.where((session) => !session._disposed));
 
   Future<PreviewSession> open({
     required String archivePath,
@@ -53,6 +58,18 @@ class FilePreviewService {
   }) async {
     if (_disposed) throw StateError('FilePreviewService is disposed');
     final normalizedEntry = normalizeArchiveEntryPath(entryPath);
+    _sessions.removeWhere((session) => session._disposed);
+    for (final session in _sessions) {
+      if (session.archivePath == archivePath &&
+          session.entryPath == normalizedEntry &&
+          await session.file.exists()) {
+        await launcher.open(session.filePath);
+        return session;
+      }
+    }
+    if (_sessions.length >= maxSessions) {
+      throw const ArchiveException('预览窗口过多，请先保存修改并关闭已有预览会话');
+    }
     final root = await Directory.systemTemp.createTemp('jucier-preview-');
     try {
       await extract(root.path);
@@ -88,6 +105,11 @@ class FilePreviewService {
     }
   }
 
+  Future<void> close(PreviewSession session) async {
+    await session.dispose();
+    _sessions.remove(session);
+  }
+
   Future<void> dispose() async {
     if (_disposed) return;
     _disposed = true;
@@ -110,7 +132,7 @@ class PreviewSession {
 
   final String archivePath;
   final String entryPath;
-  final String? password;
+  String? password;
   final File file;
   final Directory _root;
   final Duration _pollInterval;
@@ -118,6 +140,9 @@ class PreviewSession {
 
   Timer? _timer;
   _FileSignature? _baseline;
+  _FileSignature? _candidate;
+  bool _retryRequested = false;
+  DateTime? _retryAfter;
   bool _checking = false;
   bool _disposed = false;
 
@@ -128,19 +153,44 @@ class PreviewSession {
   }
 
   void _start() {
-    _timer = Timer.periodic(_pollInterval, (_) => _check());
+    _timer = Timer.periodic(_pollInterval, (_) {
+      unawaited(
+        _check().catchError((Object _) {
+          _retryAfter = DateTime.now().add(const Duration(seconds: 10));
+        }),
+      );
+    });
   }
 
-  Future<void> checkNow() => _check();
+  Future<void> checkNow() => _check(force: true);
 
-  Future<void> _check() async {
+  void retryPendingChange() {
+    _retryRequested = true;
+  }
+
+  Future<void> _check({bool force = false}) async {
     if (_disposed || _checking) return;
+    if (!force &&
+        _retryAfter != null &&
+        DateTime.now().isBefore(_retryAfter!)) {
+      return;
+    }
     _checking = true;
     try {
       final current = await _signature();
       if (current == null || current == _baseline) return;
-      _baseline = current;
+      if (!force && current != _candidate) {
+        _candidate = current;
+        return;
+      }
+      _retryRequested = false;
       await _onChanged(this);
+      if (_retryRequested) {
+        _retryAfter = DateTime.now().add(const Duration(seconds: 10));
+      } else {
+        _baseline = current;
+        _retryAfter = null;
+      }
     } finally {
       _checking = false;
     }

@@ -92,6 +92,7 @@ class _JucierShellState extends State<JucierShell> {
   bool _settingsOpen = false;
   bool _creatingArchive = false;
   bool _draftLoading = false;
+  int _draftGeneration = 0;
   List<String> _draftSources = [];
   ArchiveListing _draftListing = const ArchiveListing(
     archivePath: '新建压缩包',
@@ -155,10 +156,13 @@ class _JucierShellState extends State<JucierShell> {
             childPad: false,
             footer: _workflow.operationLabel == null
                 ? null
-                : OperationProgress(
-                    label: _workflow.operationLabel!,
-                    progress: _workflow.progress,
-                    onCancel: _workflow.cancel,
+                : ValueListenableBuilder<double?>(
+                    valueListenable: _workflow.progressChanges,
+                    builder: (context, progress, _) => OperationProgress(
+                      label: _workflow.operationLabel ?? '正在完成',
+                      progress: progress,
+                      onCancel: _workflow.cancel,
+                    ),
                   ),
             child: Padding(
               key: const ValueKey('window-content-padding'),
@@ -241,6 +245,8 @@ class _JucierShellState extends State<JucierShell> {
       onExtractEntries: _extractEntries,
       onDeleteEntries: _deleteEntries,
       onImport: _pickEntriesToAdd,
+      onOptimize: _optimizeCurrentArchive,
+      onManagePreviews: _previews.sessions.isEmpty ? null : _managePreviews,
       onDropped: _addDroppedEntries,
       onDragEntries: _dragEntries,
     );
@@ -278,6 +284,7 @@ class _JucierShellState extends State<JucierShell> {
     setState(() {
       _creatingArchive = true;
       _draftLoading = false;
+      _draftGeneration++;
       _draftSources = [];
       _draftListing = const ArchiveListing(
         archivePath: '新压缩包',
@@ -291,6 +298,7 @@ class _JucierShellState extends State<JucierShell> {
     setState(() {
       _creatingArchive = false;
       _draftLoading = false;
+      _draftGeneration++;
       _draftSources = [];
     });
   }
@@ -323,20 +331,40 @@ class _JucierShellState extends State<JucierShell> {
         nextSources.add(path);
       }
     }
+    final generation = ++_draftGeneration;
+    final previous = _draftListing;
+    final added = nextSources
+        .where((source) => !_draftSources.contains(source))
+        .toList();
     setState(() => _draftLoading = true);
     try {
-      final listing = await buildArchiveDraftListing(nextSources);
-      if (!mounted || !_creatingArchive) return;
+      final increment = await buildArchiveDraftListing(added);
+      final listing = ArchiveListing(
+        archivePath: previous.archivePath,
+        entries: [...previous.entries, ...increment.entries],
+        physicalSize:
+            (previous.physicalSize ?? 0) + (increment.physicalSize ?? 0),
+      );
+      if (!mounted || !_creatingArchive || generation != _draftGeneration) {
+        return;
+      }
       setState(() {
         _draftSources = nextSources;
         _draftListing = listing;
       });
     } on FileSystemException catch (error) {
       if (mounted) {
-        await showMessageDialog(context, title: '无法导入', message: error.message);
+        await showMessageDialog(
+          context,
+          title: '无法导入',
+          message: error.message,
+          details: error.toString(),
+        );
       }
     } finally {
-      if (mounted) setState(() => _draftLoading = false);
+      if (mounted && generation == _draftGeneration) {
+        setState(() => _draftLoading = false);
+      }
     }
   }
 
@@ -363,7 +391,7 @@ class _JucierShellState extends State<JucierShell> {
       // Explicit cancellations do not need an error dialog.
     } on ArchiveException catch (error) {
       if (mounted) {
-        await showMessageDialog(context, title: '无法打开', message: error.message);
+        await showArchiveErrorDialog(context, title: '无法打开', error: error);
       }
     }
   }
@@ -378,6 +406,7 @@ class _JucierShellState extends State<JucierShell> {
       _settingsOpen = false;
       _creatingArchive = false;
       _draftLoading = false;
+      _draftGeneration++;
       _draftSources = [];
     });
     await _openArchive(path);
@@ -531,7 +560,7 @@ class _JucierShellState extends State<JucierShell> {
       // Explicit cancellations do not need an error dialog.
     } on ArchiveException catch (error) {
       if (mounted) {
-        await showMessageDialog(context, title: '压缩失败', message: error.message);
+        await showArchiveErrorDialog(context, title: '压缩失败', error: error);
       }
     }
   }
@@ -574,11 +603,24 @@ class _JucierShellState extends State<JucierShell> {
     if (options == null || !mounted) return;
 
     try {
+      if (await File(options.archivePath).exists() ||
+          await File('${options.archivePath}.001').exists()) {
+        if (!mounted) return;
+        final replace = await showConfirmationDialog(
+          context,
+          title: '替换已有压缩包？',
+          message: '新压缩包将替换 ${p.basename(options.archivePath)}，旧包中的其他文件不会保留。',
+          confirmLabel: '替换',
+          destructive: true,
+        );
+        if (!replace || !mounted) return;
+      }
       await _workflow.create(options);
       if (mounted) {
         setState(() {
           _creatingArchive = false;
           _draftLoading = false;
+          _draftGeneration++;
           _draftSources = [];
         });
       }
@@ -586,7 +628,7 @@ class _JucierShellState extends State<JucierShell> {
       // Explicit cancellations do not need an error dialog.
     } on ArchiveException catch (error) {
       if (mounted) {
-        await showMessageDialog(context, title: '压缩失败', message: error.message);
+        await showArchiveErrorDialog(context, title: '压缩失败', error: error);
       }
     }
   }
@@ -602,7 +644,27 @@ class _JucierShellState extends State<JucierShell> {
     if (options == null || !mounted) return;
 
     try {
-      await _workflow.extract(options);
+      var password = options.password;
+      while (true) {
+        try {
+          await _workflow.extract(
+            ExtractArchiveOptions(
+              archivePath: options.archivePath,
+              outputDirectory: options.outputDirectory,
+              conflict: options.conflict,
+              password: password,
+            ),
+          );
+          break;
+        } on ArchivePasswordRequiredException {
+          if (!mounted) return;
+          password = await showPasswordDialog(context, title: '输入压缩包密码');
+          if (password == null || !mounted) return;
+          if (_workflow.listing?.archivePath == options.archivePath) {
+            _workflow.rememberPassword(password);
+          }
+        }
+      }
       if (mounted) {
         await showMessageDialog(
           context,
@@ -618,7 +680,7 @@ class _JucierShellState extends State<JucierShell> {
       // Explicit cancellations do not need an error dialog.
     } on ArchiveException catch (error) {
       if (mounted) {
-        await showMessageDialog(context, title: '解压失败', message: error.message);
+        await showArchiveErrorDialog(context, title: '解压失败', error: error);
       }
     }
   }
@@ -627,7 +689,7 @@ class _JucierShellState extends State<JucierShell> {
     final listing = _workflow.listing;
     if (listing == null) return;
     try {
-      await _workflow.testCurrent();
+      await _withArchivePassword(() => _workflow.testCurrent());
       if (mounted) {
         await showMessageDialog(context, title: '测试完成', message: '没有发现错误。');
       }
@@ -635,7 +697,135 @@ class _JucierShellState extends State<JucierShell> {
       // Explicit cancellations do not need an error dialog.
     } on ArchiveException catch (error) {
       if (mounted) {
-        await showMessageDialog(context, title: '测试失败', message: error.message);
+        await showArchiveErrorDialog(context, title: '测试失败', error: error);
+      }
+    }
+  }
+
+  Future<void> _managePreviews() async {
+    final selected = await showFDialog<PreviewSession>(
+      context: context,
+      builder: (context, _, animation) => FDialog(
+        animation: animation,
+        constraints: const BoxConstraints(
+          minWidth: 380,
+          maxWidth: 460,
+          maxHeight: 500,
+        ),
+        builder: (context, style) => Padding(
+          padding: const EdgeInsets.all(20),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text('关闭预览会话', style: style.titleTextStyle),
+                const SizedBox(height: 12),
+                for (final session in _previews.sessions)
+                  FButton(
+                    variant: FButtonVariant.ghost,
+                    onPress: () => Navigator.of(context).pop(session),
+                    child: Text(
+                      '${p.basename(session.archivePath)} / ${session.entryPath}',
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    if (selected == null || !mounted) return;
+    final close = await showConfirmationDialog(
+      context,
+      title: '关闭此预览会话？',
+      message: '请先在编辑器中保存，并将需要的修改应用到压缩包。关闭会删除此会话的临时文件。',
+      confirmLabel: '关闭会话',
+    );
+    if (close) {
+      await _previews.close(selected);
+      if (mounted) setState(() {});
+    }
+  }
+
+  Future<void> _withArchivePassword(Future<void> Function() action) async {
+    final archivePath = _workflow.listing?.archivePath;
+    while (true) {
+      try {
+        await action();
+        return;
+      } on ArchivePasswordRequiredException {
+        if (!mounted) throw const ArchiveCancelledException();
+        final password = await showPasswordDialog(context, title: '输入压缩包密码');
+        if (password == null || !mounted) {
+          throw const ArchiveCancelledException();
+        }
+        if (_workflow.listing?.archivePath != archivePath) {
+          throw const ArchiveCancelledException();
+        }
+        _workflow.rememberPassword(password);
+      }
+    }
+  }
+
+  Future<void> _extractWithPassword(ExtractEntriesOptions options) async {
+    var password = options.password;
+    while (true) {
+      try {
+        await _workflow.extractEntries(
+          ExtractEntriesOptions(
+            archivePath: options.archivePath,
+            entryPaths: options.entryPaths,
+            outputDirectory: options.outputDirectory,
+            password: password,
+            conflict: options.conflict,
+            withoutParentDirectories: options.withoutParentDirectories,
+            selectedEntryPath: options.selectedEntryPath,
+            selectedEntryPaths: options.selectedEntryPaths,
+            outputPath: options.outputPath,
+          ),
+        );
+        return;
+      } on ArchivePasswordRequiredException {
+        if (!mounted) throw const ArchiveCancelledException();
+        password = await showPasswordDialog(context, title: '输入压缩包密码');
+        if (password == null || !mounted) {
+          throw const ArchiveCancelledException();
+        }
+        if (_workflow.listing?.archivePath == options.archivePath) {
+          _workflow.rememberPassword(password);
+        }
+      }
+    }
+  }
+
+  Future<void> _optimizeCurrentArchive() async {
+    final listing = _workflow.listing;
+    if (listing == null || !listing.canOptimize || _workflow.busy) return;
+    final confirmed = await showConfirmationDialog(
+      context,
+      title: '整理压缩包？',
+      message: '这会解压并重新压缩整个压缩包，可能耗时较长，并需要容纳解压内容的临时空间。将使用标准压缩等级重新生成固实压缩包。',
+      confirmLabel: '开始整理',
+    );
+    if (!confirmed || !mounted) return;
+    try {
+      await _withArchivePassword(
+        () => _workflow.addEntries(
+          AddEntriesOptions(
+            archivePath: listing.archivePath,
+            sources: const [],
+            destinationDirectory: '',
+            password: _workflow.password,
+            recompress: true,
+          ),
+        ),
+      );
+    } on ArchiveCancelledException {
+      return;
+    } on ArchiveException catch (error) {
+      if (mounted) {
+        await showArchiveErrorDialog(context, title: '整理未完成', error: error);
       }
     }
   }
@@ -644,14 +834,14 @@ class _JucierShellState extends State<JucierShell> {
     final listing = _workflow.listing;
     if (listing == null || entry.isDirectory || _workflow.busy) return;
     try {
-      await _previews.open(
+      final session = await _previews.open(
         archivePath: listing.archivePath,
         entryPath: entry.path,
         password: _workflow.password,
         preserveArchiveStructure:
             widget.singleEntryExtractionMode ==
             SingleEntryExtractionMode.preserveArchiveStructure,
-        extract: (outputDirectory) => _workflow.extractEntries(
+        extract: (outputDirectory) => _extractWithPassword(
           ExtractEntriesOptions(
             archivePath: listing.archivePath,
             entryPaths: [entry.path],
@@ -664,6 +854,8 @@ class _JucierShellState extends State<JucierShell> {
           ),
         ),
       );
+      session.password = _workflow.password;
+      if (mounted) setState(() {});
     } on ArchivePasswordRequiredException {
       if (mounted) {
         await showMessageDialog(context, title: '无法预览', message: '压缩包密码不正确。');
@@ -672,7 +864,7 @@ class _JucierShellState extends State<JucierShell> {
       // Explicit cancellations do not need an error dialog.
     } on ArchiveException catch (error) {
       if (mounted) {
-        await showMessageDialog(context, title: '无法预览', message: error.message);
+        await showArchiveErrorDialog(context, title: '无法预览', error: error);
       }
     }
   }
@@ -686,12 +878,14 @@ class _JucierShellState extends State<JucierShell> {
       return;
     }
     try {
-      await _workflow.addEntries(
-        AddEntriesOptions(
-          archivePath: listing.archivePath,
-          sources: paths,
-          destinationDirectory: directory,
-          password: _workflow.password,
+      await _withArchivePassword(
+        () => _workflow.addEntries(
+          AddEntriesOptions(
+            archivePath: listing.archivePath,
+            sources: paths,
+            destinationDirectory: directory,
+            password: _workflow.password,
+          ),
         ),
       );
       if (mounted) {
@@ -706,7 +900,7 @@ class _JucierShellState extends State<JucierShell> {
       // Explicit cancellations do not need an error dialog.
     } on ArchiveException catch (error) {
       if (mounted) {
-        await showMessageDialog(context, title: '添加失败', message: error.message);
+        await showArchiveErrorDialog(context, title: '添加失败', error: error);
       }
     }
   }
@@ -765,11 +959,7 @@ class _JucierShellState extends State<JucierShell> {
       await _archiveDragService.beginDrag(items);
     } on ArchiveException catch (error) {
       if (mounted) {
-        await showMessageDialog(
-          context,
-          title: '无法拖出文件',
-          message: error.message,
-        );
+        await showArchiveErrorDialog(context, title: '无法拖出文件', error: error);
       }
     } finally {
       for (final id in ids) {
@@ -784,7 +974,7 @@ class _JucierShellState extends State<JucierShell> {
     final payload = _dragPayloads[request.id];
     if (payload == null) throw const ArchiveException('拖拽项目已失效');
     await _workflow.waitUntilIdle();
-    await _workflow.extractEntries(
+    await _extractWithPassword(
       ExtractEntriesOptions(
         archivePath: payload.archivePath,
         entryPaths: payload.entryPaths,
@@ -813,27 +1003,28 @@ class _JucierShellState extends State<JucierShell> {
     try {
       if (widget.singleEntryExtractionMode ==
           SingleEntryExtractionMode.selectedOnly) {
-        for (final entry in entries) {
-          await _workflow.extractEntries(
-            ExtractEntriesOptions(
-              archivePath: listing.archivePath,
-              entryPaths: _pathsForEntry(listing, entry),
-              outputDirectory: outputDirectory,
-              password: _workflow.password,
-              withoutParentDirectories: true,
-              selectedEntryPath: entry.path,
-              conflict: entries.length > 1
-                  ? ExtractionConflict.rename
-                  : ExtractionConflict.overwrite,
-            ),
-          );
-        }
+        await _extractWithPassword(
+          ExtractEntriesOptions(
+            archivePath: listing.archivePath,
+            entryPaths: entries
+                .expand((entry) => _pathsForEntry(listing, entry))
+                .toSet()
+                .toList(),
+            selectedEntryPaths: entries.map((entry) => entry.path).toList(),
+            outputDirectory: outputDirectory,
+            password: _workflow.password,
+            withoutParentDirectories: true,
+            conflict: entries.length > 1
+                ? ExtractionConflict.rename
+                : ExtractionConflict.overwrite,
+          ),
+        );
       } else {
         final paths = entries
             .expand((entry) => _pathsForEntry(listing, entry))
             .toSet()
             .toList();
-        await _workflow.extractEntries(
+        await _extractWithPassword(
           ExtractEntriesOptions(
             archivePath: listing.archivePath,
             entryPaths: paths,
@@ -858,7 +1049,7 @@ class _JucierShellState extends State<JucierShell> {
       return false;
     } on ArchiveException catch (error) {
       if (mounted) {
-        await showMessageDialog(context, title: '解压失败', message: error.message);
+        await showArchiveErrorDialog(context, title: '解压失败', error: error);
       }
       return false;
     }
@@ -891,14 +1082,14 @@ class _JucierShellState extends State<JucierShell> {
           .expand((entry) => _pathsForEntry(listing, entry))
           .toSet()
           .toList();
-      await _workflow.deleteEntries(paths);
+      await _withArchivePassword(() => _workflow.deleteEntries(paths));
       return true;
     } on ArchiveCancelledException {
       // Explicit cancellations do not need an error dialog.
       return false;
     } on ArchiveException catch (error) {
       if (mounted) {
-        await showMessageDialog(context, title: '删除失败', message: error.message);
+        await showArchiveErrorDialog(context, title: '删除失败', error: error);
       }
       return false;
     }
@@ -928,12 +1119,25 @@ class _JucierShellState extends State<JucierShell> {
     if (!mounted) return;
 
     try {
-      await _workflow.updateEntry(
-        archivePath: session.archivePath,
-        entryPath: session.entryPath,
-        sourcePath: session.filePath,
-        password: session.password,
-      );
+      while (true) {
+        try {
+          await _workflow.updateEntry(
+            archivePath: session.archivePath,
+            entryPath: session.entryPath,
+            sourcePath: session.filePath,
+            password: session.password,
+          );
+          break;
+        } on ArchivePasswordRequiredException {
+          if (!mounted) return;
+          final password = await showPasswordDialog(context, title: '输入压缩包密码');
+          if (password == null || !mounted) return;
+          session.password = password;
+          if (_workflow.listing?.archivePath == session.archivePath) {
+            _workflow.rememberPassword(password);
+          }
+        }
+      }
       if (mounted) {
         await showMessageDialog(
           context,
@@ -942,12 +1146,9 @@ class _JucierShellState extends State<JucierShell> {
         );
       }
     } on ArchiveException catch (error) {
+      session.retryPendingChange();
       if (mounted) {
-        await showMessageDialog(
-          context,
-          title: '无法应用修改',
-          message: error.message,
-        );
+        await showArchiveErrorDialog(context, title: '无法应用修改', error: error);
       }
     }
   }
@@ -974,14 +1175,28 @@ class _JucierShellState extends State<JucierShell> {
           ),
         )
         .toList();
+    final sorted = [...normalized]..sort((a, b) => a.key.compareTo(b.key));
+    final selectedPaths = <String>{};
+    final parents = <String>{};
+    for (final candidate in sorted) {
+      var ancestor = p.posix.dirname(candidate.key);
+      var covered = false;
+      while (ancestor != '.' && ancestor != '/') {
+        if (parents.contains(ancestor)) {
+          covered = true;
+          break;
+        }
+        ancestor = p.posix.dirname(ancestor);
+      }
+      if (covered) continue;
+      selectedPaths.add(candidate.key);
+      if (candidate.value.isDirectory) parents.add(candidate.key);
+    }
+    final emitted = <String>{};
     return normalized
         .where(
-          (candidate) => !normalized.any(
-            (other) =>
-                other.key != candidate.key &&
-                other.value.isDirectory &&
-                candidate.key.startsWith('${other.key}/'),
-          ),
+          (entry) =>
+              selectedPaths.contains(entry.key) && emitted.add(entry.key),
         )
         .map((entry) => entry.value)
         .toList();

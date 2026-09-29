@@ -31,6 +31,10 @@ abstract interface class ArchiveFileAssociationService {
   Future<ArchiveFileAssociationStatus> status(List<String> extensions);
 
   Future<ArchiveFileAssociationStatus> setAsDefault(List<String> extensions);
+
+  Future<ArchiveFileAssociationStatus> restoreSystemDefault(
+    List<String> extensions,
+  );
 }
 
 /// Reads and changes the default macOS handler for selected archive types.
@@ -50,6 +54,11 @@ class MacOSArchiveFileAssociationService
   @override
   Future<ArchiveFileAssociationStatus> setAsDefault(List<String> extensions) =>
       _invoke('setDefaultArchiveFormats', extensions);
+
+  @override
+  Future<ArchiveFileAssociationStatus> restoreSystemDefault(
+    List<String> extensions,
+  ) => _invoke('restoreDefaultArchiveFormats', extensions);
 
   Future<ArchiveFileAssociationStatus> _invoke(
     String method,

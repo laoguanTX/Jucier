@@ -323,6 +323,8 @@ class MainFlutterWindow: NSWindow {
         self.setArchiveColumnPreferences(call.arguments, result: result)
       case "archiveFileAssociationStatus":
         result(self.archiveFileAssociationStatus(call.arguments))
+      case "restoreDefaultArchiveFormats":
+        self.setDefaultArchiveFormats(call.arguments, restore: true, result: result)
       case "setDefaultArchiveFormats":
         self.setDefaultArchiveFormats(call.arguments, result: result)
       default:
@@ -448,8 +450,16 @@ class MainFlutterWindow: NSWindow {
     return ["available": true, "defaults": defaults]
   }
 
-  private func setDefaultArchiveFormats(_ value: Any?, result: @escaping FlutterResult) {
+  private func setDefaultArchiveFormats(_ value: Any?, restore: Bool = false, result: @escaping FlutterResult) {
+    let allowed: Set<String> = [
+      "zip", "7z", "rar", "tar", "gz", "tgz", "bz2", "tbz2", "tbz",
+      "xz", "txz", "zst", "tzst", "zipx", "cab", "lzh", "lha", "arj", "cpio",
+    ]
     let extensions = archiveExtensions(value)
+    guard extensions.allSatisfy({ allowed.contains($0) }) else {
+      result(FlutterError(code: "unsupported_archive_association", message: "只能更改普通压缩包格式的默认打开方式", details: nil))
+      return
+    }
     guard !extensions.isEmpty else {
       result(FlutterError(
         code: "empty_archive_formats",
@@ -470,7 +480,9 @@ class MainFlutterWindow: NSWindow {
           } else {
             result(FlutterError(
               code: "archive_association_failed",
-              message: "无法绑定以下格式：\(failures.joined(separator: ", "))",
+              message: restore
+                ? "以下格式无法恢复：\(failures.joined(separator: ", "))。系统没有对应的默认工具、原应用已不可用或 macOS 拒绝了更改。"
+                : "无法绑定以下格式：\(failures.joined(separator: ", "))",
               details: failures))
           }
         }
@@ -484,8 +496,38 @@ class MainFlutterWindow: NSWindow {
         bindNext()
         return
       }
+      var targetURL = applicationURL
+      let previousKey = "archivePreviousHandlers"
+      var previous = UserDefaults.standard.dictionary(forKey: previousKey) as? [String: String] ?? [:]
+      if restore {
+        // Use Apple's declared default document types rather than assuming
+        // Archive Utility can decode every archive that 7-Zip supports.
+        let archiveUtility = URL(fileURLWithPath: "/System/Library/CoreServices/Applications/Archive Utility.app")
+        let documents = Bundle(url: archiveUtility)?.infoDictionary?["CFBundleDocumentTypes"] as? [[String: Any]] ?? []
+        let systemSupported = documents.contains { document in
+          guard document["LSIsAppleDefaultForType"] as? Bool == true,
+            let types = document["LSItemContentTypes"] as? [String] else { return false }
+          return types.contains(contentType.identifier)
+        }
+        if systemSupported {
+          targetURL = archiveUtility
+        } else if let identifier = previous[fileExtension],
+          let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: identifier),
+          url.standardizedFileURL != applicationURL.standardizedFileURL {
+          targetURL = url
+        } else {
+          failures.append(fileExtension)
+          bindNext()
+          return
+        }
+      } else if let current = NSWorkspace.shared.urlForApplication(toOpen: contentType),
+        current.standardizedFileURL != applicationURL.standardizedFileURL,
+        let identifier = Bundle(url: current)?.bundleIdentifier {
+        previous[fileExtension] = identifier
+        UserDefaults.standard.set(previous, forKey: previousKey)
+      }
       NSWorkspace.shared.setDefaultApplication(
-        at: applicationURL,
+        at: targetURL,
         toOpen: contentType
       ) { error in
         if error != nil {

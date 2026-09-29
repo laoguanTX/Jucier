@@ -3,10 +3,16 @@ import 'package:material_ui/material_ui.dart';
 
 import '../archive/archive_formats.dart';
 
-Future<List<String>?> showArchiveFileAssociationDialog(
+class ArchiveAssociationChoice {
+  const ArchiveAssociationChoice(this.extensions, {this.restore = false});
+  final List<String> extensions;
+  final bool restore;
+}
+
+Future<ArchiveAssociationChoice?> showArchiveFileAssociationDialog(
   BuildContext context, {
   required Set<String> defaultExtensions,
-}) => showFDialog<List<String>>(
+}) => showFDialog<ArchiveAssociationChoice>(
   context: context,
   barrierDismissible: false,
   builder: (context, _, animation) => FDialog(
@@ -49,7 +55,7 @@ class _ArchiveFileAssociationFormState
           Text('默认打开方式', style: widget.style.titleTextStyle),
           const SizedBox(height: 6),
           Text(
-            '勾选本次要绑定的格式。未勾选格式的现有默认应用不会更改；macOS 可能要求确认。',
+            '选择格式后设为默认，或恢复系统默认。系统不支持的格式尝试恢复绑定前的应用；未选择的格式保持不变。',
             style: widget.style.bodyTextStyle,
           ),
           const SizedBox(height: 10),
@@ -59,13 +65,13 @@ class _ArchiveFileAssociationFormState
               children: [
                 FCheckbox(
                   key: const ValueKey('associate-select-all'),
-                  value: _selected.length == supportedArchiveExtensions.length,
+                  value: _selected.length == associableArchiveExtensions.length,
                   onChange: (selected) => setState(() {
                     _selected
                       ..clear()
                       ..addAll(
                         selected
-                            ? supportedArchiveExtensions
+                            ? associableArchiveExtensions
                             : const <String>[],
                       );
                   }),
@@ -93,11 +99,11 @@ class _ArchiveFileAssociationFormState
               ),
               clipBehavior: Clip.antiAlias,
               child: ListView.separated(
-                itemCount: supportedArchiveExtensions.length,
+                itemCount: associableArchiveExtensions.length,
                 separatorBuilder: (_, _) =>
                     Divider(height: 1, color: colors.border),
                 itemBuilder: (context, index) {
-                  final extension = supportedArchiveExtensions[index];
+                  final extension = associableArchiveExtensions[index];
                   final isDefault = widget.defaultExtensions.contains(
                     extension,
                   );
@@ -150,14 +156,33 @@ class _ArchiveFileAssociationFormState
               ),
               const SizedBox(width: 8),
               FButton(
+                key: const ValueKey('restore-archive-associations'),
+                size: FButtonSizeVariant.sm,
+                variant: FButtonVariant.outline,
+                onPress: _selected.isEmpty
+                    ? null
+                    : () => Navigator.of(context).pop(
+                        ArchiveAssociationChoice(
+                          associableArchiveExtensions
+                              .where(_selected.contains)
+                              .toList(),
+                          restore: true,
+                        ),
+                      ),
+                child: const Text('恢复系统默认'),
+              ),
+              const SizedBox(width: 8),
+              FButton(
                 key: const ValueKey('apply-archive-associations'),
                 size: FButtonSizeVariant.sm,
                 onPress: _selected.isEmpty
                     ? null
                     : () => Navigator.of(context).pop(
-                        supportedArchiveExtensions
-                            .where(_selected.contains)
-                            .toList(),
+                        ArchiveAssociationChoice(
+                          associableArchiveExtensions
+                              .where(_selected.contains)
+                              .toList(),
+                        ),
                       ),
                 child: const Text('设为默认'),
               ),

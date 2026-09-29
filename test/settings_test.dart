@@ -395,19 +395,51 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('当前默认'), findsOneWidget);
+    for (final extension in [
+      'dmg',
+      'iso',
+      'epub',
+      'jar',
+      'apk',
+      'xip',
+      'wim',
+      '001',
+    ]) {
+      expect(associableArchiveExtensions, isNot(contains(extension)));
+    }
     await tester.tap(find.byKey(const ValueKey('associate-select-all')));
     await tester.pump();
     expect(
-      find.text('已选择 ${supportedArchiveExtensions.length} 项'),
+      find.text('已选择 ${associableArchiveExtensions.length} 项'),
       findsOneWidget,
     );
     await tester.tap(find.byKey(const ValueKey('apply-archive-associations')));
     await tester.pumpAndSettle();
 
-    expect(associations.boundExtensions, [supportedArchiveExtensions]);
+    expect(associations.boundExtensions, [associableArchiveExtensions]);
     expect(
       find.text(
-        'Jucier 已是 ${supportedArchiveExtensions.length} 种压缩包格式的默认打开方式。',
+        'Jucier 已是 ${associableArchiveExtensions.length} 种压缩包格式的默认打开方式。',
+      ),
+      findsOneWidget,
+    );
+    await tester.tap(
+      find.byKey(const ValueKey('settings-file-association-action')),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('associate-format-zip')));
+    await tester.pump();
+    await tester.tap(
+      find.byKey(const ValueKey('restore-archive-associations')),
+    );
+    await tester.pumpAndSettle();
+    expect(associations.restoredExtensions, [
+      ['zip'],
+    ]);
+    expect(associations.current.defaultExtensions, isNot(contains('zip')));
+    expect(
+      find.text(
+        'Jucier 已是 ${associableArchiveExtensions.length - 1} 种压缩包格式的默认打开方式。',
       ),
       findsOneWidget,
     );
@@ -600,6 +632,21 @@ class _FakeArchiveFileAssociationService
 
   ArchiveFileAssociationStatus current;
   final List<List<String>> boundExtensions = [];
+  final List<List<String>> restoredExtensions = [];
+
+  @override
+  Future<ArchiveFileAssociationStatus> restoreSystemDefault(
+    List<String> extensions,
+  ) async {
+    restoredExtensions.add(extensions);
+    current = ArchiveFileAssociationStatus(
+      available: true,
+      defaultExtensions: current.defaultExtensions.difference(
+        extensions.toSet(),
+      ),
+    );
+    return current;
+  }
 
   @override
   Future<ArchiveFileAssociationStatus> status(List<String> extensions) async =>

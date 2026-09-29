@@ -39,6 +39,30 @@ const supportedArchiveExtensions = <String>[
   '001',
 ];
 
+/// Formats offered for default associations, excluding disk images, app and
+/// document containers, installation packages, and generic volume suffixes.
+const associableArchiveExtensions = <String>[
+  'zip',
+  '7z',
+  'rar',
+  'tar',
+  'gz',
+  'tgz',
+  'bz2',
+  'tbz2',
+  'tbz',
+  'xz',
+  'txz',
+  'zst',
+  'tzst',
+  'zipx',
+  'cab',
+  'lzh',
+  'lha',
+  'arj',
+  'cpio',
+];
+
 const _archiveExtensionLabels = <String, String>{
   '7z': '7-Zip 压缩包 (.7z)',
   'zip': 'ZIP 压缩包 (.zip)',

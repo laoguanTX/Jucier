@@ -85,7 +85,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _loadAssociationStatus() async {
     final status = await widget.archiveFileAssociationService.status(
-      supportedArchiveExtensions,
+      associableArchiveExtensions,
     );
     if (mounted) setState(() => _associationStatus = status);
   }
@@ -488,23 +488,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
       defaultExtensions:
           _associationStatus?.defaultExtensions ?? const <String>{},
     );
-    if (selected == null || selected.isEmpty || !mounted) return;
+    if (selected == null || selected.extensions.isEmpty || !mounted) return;
     setState(() => _bindingFormats = true);
     try {
-      final status = await widget.archiveFileAssociationService.setAsDefault(
-        selected,
-      );
-      if (mounted) {
-        setState(() {
-          _associationStatus = ArchiveFileAssociationStatus(
-            available: status.available,
-            defaultExtensions: {
-              ...?_associationStatus?.defaultExtensions,
-              ...status.defaultExtensions,
-            },
-          );
-        });
+      if (selected.restore) {
+        await widget.archiveFileAssociationService.restoreSystemDefault(
+          selected.extensions,
+        );
+      } else {
+        await widget.archiveFileAssociationService.setAsDefault(
+          selected.extensions,
+        );
       }
+      await _loadAssociationStatus();
     } on PlatformException catch (error) {
       if (mounted) {
         await showMessageDialog(
@@ -514,6 +510,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         );
       }
     } finally {
+      await _loadAssociationStatus();
       if (mounted) setState(() => _bindingFormats = false);
     }
   }

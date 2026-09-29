@@ -29,10 +29,12 @@ class _SettingsPageTransitionState extends State<SettingsPageTransition> {
     fit: StackFit.expand,
     children: [
       AnimatedSwitcher(
-        duration: const Duration(milliseconds: 460),
-        reverseDuration: const Duration(milliseconds: 340),
-        switchInCurve: Curves.easeOutCubic,
-        switchOutCurve: Curves.easeInCubic,
+        duration: const Duration(milliseconds: 520),
+        reverseDuration: const Duration(milliseconds: 360),
+        // Apply easing once below, so the reveal and its wave stay in step.
+        switchInCurve: Curves.linear,
+        switchOutCurve: Curves.linear,
+        layoutBuilder: _buildPageLayers,
         transitionBuilder: _buildTransition,
         child: widget.child,
       ),
@@ -50,9 +52,46 @@ class _SettingsPageTransitionState extends State<SettingsPageTransition> {
     ],
   );
 
+  Widget _buildPageLayers(Widget? currentChild, List<Widget> previousChildren) {
+    final layers = [...previousChildren, ?currentChild];
+    // Settings remains the covering surface in both directions. The default
+    // switcher puts the incoming workspace above settings when closing it.
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        // Keep the switcher's entry key on the outermost widget. Otherwise
+        // adding/removing the workspace changes the settings slot, remounts
+        // its State, and briefly hides rows backed by asynchronous status.
+        for (final layer in layers.where((layer) => !_isSettingsLayer(layer)))
+          IgnorePointer(
+            key: layer.key,
+            ignoring: layer != currentChild,
+            child: layer,
+          ),
+        for (final layer in layers.where(_isSettingsLayer))
+          IgnorePointer(
+            key: layer.key,
+            ignoring: layer != currentChild,
+            child: layer,
+          ),
+      ],
+    );
+  }
+
+  bool _isSettingsLayer(Widget layer) {
+    // AnimatedSwitcher wraps each transition to retain its entry identity.
+    while (layer is KeyedSubtree) {
+      layer = layer.child;
+    }
+    return layer.key == const ValueKey('settings-circular-reveal');
+  }
+
   Widget _buildTransition(Widget child, Animation<double> animation) {
     if (child.key != const ValueKey('settings-page')) {
-      return FadeTransition(opacity: animation, child: child);
+      return FadeTransition(
+        opacity: animation.drive(CurveTween(curve: Curves.easeOutCubic)),
+        child: child,
+      );
     }
 
     if (_listenedTransitions.add(animation)) {
@@ -75,13 +114,16 @@ class _SettingsPageTransitionState extends State<SettingsPageTransition> {
       animation: animation,
       child: child,
       builder: (context, child) {
-        final progress = Curves.easeOutCubic.transform(animation.value);
+        final progress = const Cubic(0.2, 0, 0.2, 1).transform(animation.value);
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted) _revealProgress.value = progress;
         });
         return ClipPath(
           clipper: _CircularRevealClipper(progress),
-          child: child,
+          child: ColoredBox(
+            color: context.theme.colors.background,
+            child: child,
+          ),
         );
       },
     );
@@ -126,13 +168,39 @@ class _CircularRipplePainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     if (progress <= 0 || progress >= 1) return;
+
+    final origin = _revealOrigin(size);
+    final radius = _revealRadius(size) * progress;
+    // A soft crest with a wider, quieter wake feels like a water ripple.
+    // Fade both ends so the first frame never flashes a dark ring.
+    final strength = math.sin(math.pi * progress);
+    final width = math.min(radius, 12 + 24 * progress);
+    final outerRadius = radius + width * 0.3;
+    final innerStop = (radius - width) / outerRadius;
+    final crestStop = radius / outerRadius;
+
     canvas.drawCircle(
-      _revealOrigin(size),
-      _revealRadius(size) * progress,
+      origin,
+      outerRadius,
       Paint()
-        ..color = color.withValues(alpha: (1 - progress) * 0.24)
+        ..shader = RadialGradient(
+          colors: [
+            color.withValues(alpha: 0),
+            color.withValues(alpha: 0),
+            color.withValues(alpha: 0.025 * strength),
+            color.withValues(alpha: 0.09 * strength),
+            color.withValues(alpha: 0),
+          ],
+          stops: [0, innerStop, (innerStop + crestStop) / 2, crestStop, 1],
+        ).createShader(Rect.fromCircle(center: origin, radius: outerRadius)),
+    );
+    canvas.drawCircle(
+      origin,
+      radius,
+      Paint()
+        ..color = color.withValues(alpha: 0.12 * strength)
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 3,
+        ..strokeWidth = 0.8 + 0.6 * (1 - progress),
     );
   }
 

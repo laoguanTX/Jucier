@@ -304,6 +304,15 @@ class MainFlutterWindow: NSWindow {
         self.setThemeMode(call.arguments, result: result)
       case "openFile":
         self.openFile(call.arguments, result: result)
+      case "smartExtractionEnabled":
+        result(UserDefaults.standard.object(forKey: "smartExtractionEnabled") as? Bool ?? true)
+      case "setSmartExtractionEnabled":
+        guard let enabled = call.arguments as? Bool else {
+          result(FlutterError(code: "invalid_preference", message: "无效的智能解压设置", details: nil))
+          return
+        }
+        UserDefaults.standard.set(enabled, forKey: "smartExtractionEnabled")
+        result(nil)
       case "singleEntryExtractionMode":
         result(self.storedSingleEntryExtractionMode())
       case "setSingleEntryExtractionMode":

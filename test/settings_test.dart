@@ -16,6 +16,42 @@ import 'package:jucier/platform/theme_preference_store.dart';
 import 'package:material_ui/material_ui.dart';
 
 void main() {
+  testWidgets('smart extraction is enabled by default and can be disabled', (
+    tester,
+  ) async {
+    bool? saved;
+    const channel = MethodChannel('dev.jucier/platform');
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+          if (call.method == 'smartExtractionEnabled') return saved;
+          if (call.method == 'setSmartExtractionEnabled') {
+            saved = call.arguments as bool;
+          }
+          return null;
+        });
+    addTearDown(
+      () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, null),
+    );
+    await tester.pumpWidget(
+      JucierApp(
+        engine: _UnusedArchiveEngine(),
+        fileAccessService: _FakeFileAccessService(),
+        themePreferenceStore: _FakeThemePreferenceStore(),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('设置'));
+    await tester.pumpAndSettle();
+    final toggle = find.byKey(const ValueKey('smart-extraction-switch'));
+    await tester.ensureVisible(toggle);
+    expect(tester.widget<FSwitch>(toggle).value, isTrue);
+    await tester.tap(toggle);
+    await tester.pumpAndSettle();
+    expect(tester.widget<FSwitch>(toggle).value, isFalse);
+    expect(saved, isFalse);
+  });
+
   testWidgets('requests file access on first launch and opens settings', (
     tester,
   ) async {

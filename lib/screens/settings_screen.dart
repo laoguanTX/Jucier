@@ -24,6 +24,8 @@ class SettingsScreen extends StatefulWidget {
     this.singleEntryExtractionMode =
         SingleEntryExtractionMode.preserveArchiveStructure,
     this.onSingleEntryExtractionModeChanged,
+    this.smartExtractionEnabled = true,
+    this.onSmartExtractionChanged,
     this.archiveColumnPreferences = const ArchiveColumnPreferences(),
     this.onArchiveColumnPreferencesChanged,
     super.key,
@@ -34,6 +36,8 @@ class SettingsScreen extends StatefulWidget {
   final FinderActionService finderActionService;
   final ThemeMode themeMode;
   final ValueChanged<ThemeMode>? onThemeModeChanged;
+  final bool smartExtractionEnabled;
+  final ValueChanged<bool>? onSmartExtractionChanged;
   final SingleEntryExtractionMode singleEntryExtractionMode;
   final ValueChanged<SingleEntryExtractionMode>?
   onSingleEntryExtractionModeChanged;
@@ -257,6 +261,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             ),
                           ],
                         ),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    _SettingsCard(
+                      key: const ValueKey('settings-smart-extraction-card'),
+                      icon: FLucideIcons.folderOpen,
+                      title: '智能解压',
+                      description: '单个文件或顶层文件夹直接解压，多项内容放入与压缩包同名的文件夹。',
+                      trailing: FSwitch(
+                        key: const ValueKey('smart-extraction-switch'),
+                        value: widget.smartExtractionEnabled,
+                        onChange: widget.onSmartExtractionChanged,
                       ),
                     ),
                     const SizedBox(height: 14),

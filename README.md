@@ -23,6 +23,7 @@ visible in a compact footer.
 - Fast incremental additions and an explicit 7z optimization action.
 - Verified replacement of existing archives, exact member selection, cancellable staging, and batched extraction.
 - Extract with overwrite, skip, or automatic rename conflict behavior.
+- Smart extraction is enabled by default and can be disabled in Settings. Whole-archive extraction wraps multiple top-level items in an archive-named folder; a single file or existing top-level folder is extracted directly.
 - Test archive integrity, show progress, and cancel the active operation.
 - Drag and drop plus native macOS open/save panels.
 - System, light, and dark desktop themes with a persistent appearance setting.

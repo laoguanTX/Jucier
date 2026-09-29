@@ -14,6 +14,7 @@ import '../archive/archive_entry.dart';
 import '../archive/archive_column.dart';
 import '../archive/archive_formats.dart';
 import '../archive/archive_options.dart';
+import '../archive/smart_extraction.dart';
 import '../dialogs/confirmation_dialog.dart';
 import '../dialogs/create_archive_dialog.dart';
 import '../dialogs/extract_dialog.dart';
@@ -54,6 +55,8 @@ class JucierShell extends StatefulWidget {
     this.singleEntryExtractionMode =
         SingleEntryExtractionMode.preserveArchiveStructure,
     this.onSingleEntryExtractionModeChanged,
+    this.smartExtractionEnabled = true,
+    this.onSmartExtractionChanged,
     this.archiveColumnPreferences = const ArchiveColumnPreferences(),
     this.onArchiveColumnPreferencesChanged,
     super.key,
@@ -68,6 +71,8 @@ class JucierShell extends StatefulWidget {
   final ThemeMode themeMode;
   final ValueChanged<ThemeMode>? onThemeModeChanged;
   final FileLauncher? fileLauncher;
+  final bool smartExtractionEnabled;
+  final ValueChanged<bool>? onSmartExtractionChanged;
   final SingleEntryExtractionMode singleEntryExtractionMode;
   final ValueChanged<SingleEntryExtractionMode>?
   onSingleEntryExtractionModeChanged;
@@ -191,6 +196,8 @@ class _JucierShellState extends State<JucierShell> {
         finderActionService: widget.finderActionService,
         themeMode: widget.themeMode,
         onThemeModeChanged: widget.onThemeModeChanged,
+        smartExtractionEnabled: widget.smartExtractionEnabled,
+        onSmartExtractionChanged: widget.onSmartExtractionChanged,
         singleEntryExtractionMode: widget.singleEntryExtractionMode,
         onSingleEntryExtractionModeChanged:
             widget.onSingleEntryExtractionModeChanged,
@@ -457,6 +464,7 @@ class _JucierShellState extends State<JucierShell> {
 
     var completed = 0;
     _FinderExtractionOutcome? stopped;
+    String? completedDirectory;
     for (final archivePath in archives) {
       if (!mounted) return;
       final outcome = await _extractFinderArchive(archivePath);
@@ -465,6 +473,7 @@ class _JucierShellState extends State<JucierShell> {
         break;
       }
       completed++;
+      completedDirectory = outcome.outputDirectory;
     }
 
     if (!mounted) return;
@@ -480,7 +489,7 @@ class _JucierShellState extends State<JucierShell> {
     await _showFinderExtractionResult(
       title: '解压完成',
       message: completed == 1
-          ? '文件已保存到 ${p.dirname(archives.first)}'
+          ? '文件已保存到 $completedDirectory'
           : '$completed 个压缩包已解压到各自所在位置。',
     );
   }
@@ -499,14 +508,20 @@ class _JucierShellState extends State<JucierShell> {
     String? password,
   }) async {
     try {
+      final destination = widget.smartExtractionEnabled
+          ? smartExtractionDirectory(
+              await widget.engine.list(archivePath, password: password),
+              p.dirname(archivePath),
+            )
+          : p.dirname(archivePath);
       await _workflow.extract(
         ExtractArchiveOptions(
           archivePath: archivePath,
-          outputDirectory: p.dirname(archivePath),
+          outputDirectory: destination,
           password: password,
         ),
       );
-      return _FinderExtractionOutcome.succeeded(archivePath);
+      return _FinderExtractionOutcome.succeeded(archivePath, destination);
     } on ArchivePasswordRequiredException {
       if (!mounted) {
         return _FinderExtractionOutcome.failed(archivePath, '应用已关闭。');
@@ -644,13 +659,16 @@ class _JucierShellState extends State<JucierShell> {
     if (options == null || !mounted) return;
 
     try {
+      final destination = widget.smartExtractionEnabled
+          ? smartExtractionDirectory(listing, options.outputDirectory)
+          : options.outputDirectory;
       var password = options.password;
       while (true) {
         try {
           await _workflow.extract(
             ExtractArchiveOptions(
               archivePath: options.archivePath,
-              outputDirectory: options.outputDirectory,
+              outputDirectory: destination,
               conflict: options.conflict,
               password: password,
             ),
@@ -669,7 +687,7 @@ class _JucierShellState extends State<JucierShell> {
         await showMessageDialog(
           context,
           title: '解压完成',
-          message: '文件已保存到 ${options.outputDirectory}',
+          message: '文件已保存到 $destination',
         );
       }
     } on ArchivePasswordRequiredException {
@@ -1212,16 +1230,22 @@ class _FinderExtractionOutcome {
     required this.archivePath,
     required this.succeeded,
     this.error,
+    this.outputDirectory,
   });
 
-  const _FinderExtractionOutcome.succeeded(String archivePath)
-    : this._(archivePath: archivePath, succeeded: true);
+  const _FinderExtractionOutcome.succeeded(String archivePath, String directory)
+    : this._(
+        archivePath: archivePath,
+        succeeded: true,
+        outputDirectory: directory,
+      );
 
   const _FinderExtractionOutcome.failed(String archivePath, String error)
     : this._(archivePath: archivePath, succeeded: false, error: error);
 
   final String archivePath;
   final bool succeeded;
+  final String? outputDirectory;
   final String? error;
 }
 

@@ -12,6 +12,7 @@ import 'platform/finder_action_service.dart';
 import 'platform/archive_column_preference_store.dart';
 import 'platform/single_entry_extraction_preference_store.dart';
 import 'platform/theme_preference_store.dart';
+import 'platform/smart_extraction_preference_store.dart';
 
 export 'application/jucier_shell.dart' show JucierShell;
 
@@ -55,6 +56,9 @@ class _JucierAppState extends State<JucierApp> {
   late final ArchiveFileAssociationService _archiveFileAssociationService;
   late final ArchiveOpenService _archiveOpenService;
   late final FinderActionService _finderActionService;
+  final _smartExtractionStore = MacOSSmartExtractionPreferenceStore();
+  bool _smartExtractionEnabled = true;
+  bool _smartExtractionChangedByUser = false;
   ThemeMode _themeMode = ThemeMode.system;
   SingleEntryExtractionMode _singleEntryExtractionMode =
       SingleEntryExtractionMode.preserveArchiveStructure;
@@ -84,9 +88,23 @@ class _JucierAppState extends State<JucierApp> {
         widget.archiveOpenService ?? MacOSArchiveOpenService();
     _finderActionService =
         widget.finderActionService ?? MacOSFinderActionService();
+    _loadSmartExtraction();
     _loadThemeMode();
     _loadSingleEntryExtractionMode();
     _loadArchiveColumnPreferences();
+  }
+
+  Future<void> _loadSmartExtraction() async {
+    final enabled = await _smartExtractionStore.load();
+    if (mounted && !_smartExtractionChangedByUser) {
+      setState(() => _smartExtractionEnabled = enabled);
+    }
+  }
+
+  void _setSmartExtraction(bool enabled) {
+    _smartExtractionChangedByUser = true;
+    setState(() => _smartExtractionEnabled = enabled);
+    _smartExtractionStore.save(enabled);
   }
 
   Future<void> _loadThemeMode() async {
@@ -169,6 +187,8 @@ class _JucierAppState extends State<JucierApp> {
         waitForInitialArchiveOpen: widget.waitForInitialArchiveOpen,
         themeMode: _themeMode,
         onThemeModeChanged: _setThemeMode,
+        smartExtractionEnabled: _smartExtractionEnabled,
+        onSmartExtractionChanged: _setSmartExtraction,
         singleEntryExtractionMode: _singleEntryExtractionMode,
         onSingleEntryExtractionModeChanged: _setSingleEntryExtractionMode,
         archiveColumnPreferences: _archiveColumnPreferences,

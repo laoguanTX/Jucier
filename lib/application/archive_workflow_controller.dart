@@ -13,7 +13,7 @@ import '../archive/archive_options.dart';
 /// remain in the presentation shell; engine state and progress are managed
 /// here.
 class ArchiveWorkflowController extends ChangeNotifier {
-  ArchiveWorkflowController(this._engine) {
+  ArchiveWorkflowController(this._engine, {this.compressionPerformance}) {
     if (_engine case final ArchiveOperationEvents events) {
       events.onPhaseChanged = (phase) {
         if (_operationLabel == phase) return;
@@ -24,6 +24,7 @@ class ArchiveWorkflowController extends ChangeNotifier {
   }
 
   final ArchiveEngine _engine;
+  final CompressionPerformance Function()? compressionPerformance;
 
   ArchiveListing? _listing;
   String? _password;
@@ -79,7 +80,16 @@ class ArchiveWorkflowController extends ChangeNotifier {
   Future<void> create(
     CreateArchiveOptions options, {
     bool openAfterCreate = true,
-  }) => _enqueue(() => _create(options, openAfterCreate: openAfterCreate));
+  }) {
+    // Capture the setting at enqueue time so later changes do not alter a
+    // pending or running operation. Finder and the create dialog share this path.
+    final performance = compressionPerformance?.call();
+    final effective = performance == null
+        ? options
+        : options.withPerformance(performance);
+    return _enqueue(() => _create(effective, openAfterCreate: openAfterCreate));
+  }
+
   Future<void> extract(ExtractArchiveOptions options) =>
       _enqueue(() => _extract(options));
   Future<void> extractEntries(ExtractEntriesOptions options) =>

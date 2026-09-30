@@ -1,4 +1,5 @@
 #include "platform_services.h"
+#include "shell_integration.h"
 
 #include <flutter/standard_message_codec.h>
 #include <flutter/standard_method_codec.h>
@@ -73,7 +74,60 @@ bool OpenFile(HWND window, const std::wstring& path) {
 }  // namespace
 
 PlatformServices::PlatformServices(flutter::BinaryMessenger* messenger,
-    HWND window, const std::vector<std::string>& arguments) {
+    HWND window, const std::vector<std::string>& arguments) : window_(window) {
+  window_channel_ = std::make_unique<flutter::MethodChannel<Value>>(
+      messenger, "dev.jucier/window", &flutter::StandardMethodCodec::GetInstance());
+  window_channel_->SetMethodCallHandler([window](const auto& call, auto result) {
+    const auto& method = call.method_name();
+    if (method == "windowState") {
+      result->Success(Value(IsZoomed(window) != FALSE));
+    } else if (method == "minimize" || method == "toggleMaximize") {
+      result->Success();
+      ShowWindow(window, method == "minimize" ? SW_MINIMIZE :
+          (IsZoomed(window) ? SW_RESTORE : SW_MAXIMIZE));
+    } else if (method == "close") {
+      result->Success();
+      PostMessageW(window, WM_CLOSE, 0, 0);
+    } else {
+      result->NotImplemented();
+    }
+  });
+  finder_action_ = std::make_unique<flutter::MethodChannel<Value>>(
+      messenger, "dev.jucier/finder_action", &flutter::StandardMethodCodec::GetInstance());
+  finder_action_->SetMethodCallHandler([this](const auto& call, auto result) {
+    const auto& method = call.method_name();
+    if (method == "takePendingFinderActions") {
+      result->Success(Value(pending_actions_));
+      pending_actions_.clear();
+    } else if (method == "finderContextMenuAvailable") {
+      result->Success(Value(shell_integration::Available()));
+    } else if (method == "repairFinderContextMenu" || method == "uninstallFinderContextMenu") {
+      const auto status = method == "repairFinderContextMenu"
+          ? shell_integration::Install() : shell_integration::Uninstall();
+      if (status == ERROR_SUCCESS) result->Success();
+      else result->Error("context_menu_failed", "无法更新资源管理器右键菜单，请检查当前用户的注册表权限。",
+                         Value(static_cast<int32_t>(status)));
+    } else {
+      result->NotImplemented();
+    }
+  });
+  const auto shell_status = shell_integration::Register(
+      [this](const std::string& action, const std::vector<std::string>& paths) {
+        List selection;
+        for (const auto& path : paths) selection.emplace_back(path);
+        pending_actions_.emplace_back(Map{{Value("action"), Value(action)},
+                                          {Value("paths"), Value(selection)}});
+        KillTimer(window_, 1);
+        ShowWindow(window_, IsIconic(window_) ? SW_RESTORE : SW_SHOW);
+        SetForegroundWindow(window_);
+        finder_action_->InvokeMethod("finderActionsAvailable", nullptr);
+      });
+  if (FAILED(shell_status)) {
+    finder_action_->SetMethodCallHandler([shell_status](const auto&, auto result) {
+      result->Error("context_menu_unavailable", "资源管理器右键菜单服务启动失败。",
+                    Value(static_cast<int32_t>(shell_status)));
+    });
+  }
   platform_ = std::make_unique<flutter::MethodChannel<Value>>(
       messenger, "dev.jucier/platform", &flutter::StandardMethodCodec::GetInstance());
   platform_->SetMethodCallHandler([window](const auto& call, auto result) {
@@ -96,13 +150,23 @@ PlatformServices::PlatformServices(flutter::BinaryMessenger* messenger,
       // Windows default handlers are chosen by the user in system settings.
       result->Success(Value(Map{{Value("available"), Value(false)}}));
     } else if (method == "themeMode" || method == "singleEntryExtractionMode" ||
-               method == "smartExtractionEnabled" || method == "archiveColumnPreferences") {
+               method == "smartExtractionEnabled" || method == "archiveColumnPreferences" ||
+               method == "compressionPerformance") {
       const auto stored = ReadPreference(method);
       if (stored) result->Success(*stored);
       else result->Success();
     } else {
       std::string key;
-      if (method == "setThemeMode") key = "themeMode";
+      if (method == "setCompressionPerformance") {
+        const auto* value = call.arguments()
+            ? std::get_if<std::string>(call.arguments()) : nullptr;
+        if (!value || (*value != "balanced" && *value != "speed" &&
+                       *value != "resourceSaving")) {
+          result->Error("invalid_preference", "无效的压缩性能设置");
+          return;
+        }
+        key = "compressionPerformance";
+      } else if (method == "setThemeMode") key = "themeMode";
       else if (method == "setSingleEntryExtractionMode") key = "singleEntryExtractionMode";
       else if (method == "setSmartExtractionEnabled") key = "smartExtractionEnabled";
       else if (method == "setArchiveColumnPreferences") key = "archiveColumnPreferences";
@@ -120,6 +184,7 @@ PlatformServices::PlatformServices(flutter::BinaryMessenger* messenger,
 
   List pending;
   for (const auto& argument : arguments) {
+    if (argument == "--shell-server" || argument == "-Embedding") continue;
     const auto path = Wide(argument);
     const DWORD attributes = GetFileAttributesW(path.c_str());
     if (attributes != INVALID_FILE_ATTRIBUTES &&
@@ -144,6 +209,14 @@ PlatformServices::PlatformServices(flutter::BinaryMessenger* messenger,
 }
 
 PlatformServices::~PlatformServices() {
+  shell_integration::Unregister();
+  finder_action_->SetMethodCallHandler(nullptr);
+  window_channel_->SetMethodCallHandler(nullptr);
   platform_->SetMethodCallHandler(nullptr);
   archive_open_->SetMethodCallHandler(nullptr);
+}
+
+void PlatformServices::NotifyWindowState() {
+  window_channel_->InvokeMethod("windowStateChanged",
+      std::make_unique<Value>(IsZoomed(window_) != FALSE));
 }

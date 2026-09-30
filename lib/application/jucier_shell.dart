@@ -51,6 +51,8 @@ class JucierShell extends StatefulWidget {
     this.waitForInitialArchiveOpen = false,
     this.themeMode = ThemeMode.system,
     this.onThemeModeChanged,
+    this.compressionPerformance = CompressionPerformance.balanced,
+    this.onCompressionPerformanceChanged,
     this.fileLauncher,
     this.singleEntryExtractionMode =
         SingleEntryExtractionMode.preserveArchiveStructure,
@@ -70,6 +72,8 @@ class JucierShell extends StatefulWidget {
   final bool waitForInitialArchiveOpen;
   final ThemeMode themeMode;
   final ValueChanged<ThemeMode>? onThemeModeChanged;
+  final CompressionPerformance compressionPerformance;
+  final ValueChanged<CompressionPerformance>? onCompressionPerformanceChanged;
   final FileLauncher? fileLauncher;
   final bool smartExtractionEnabled;
   final ValueChanged<bool>? onSmartExtractionChanged;
@@ -109,7 +113,10 @@ class _JucierShellState extends State<JucierShell> {
   void initState() {
     super.initState();
     _checkingForExternalArchive = widget.waitForInitialArchiveOpen;
-    _workflow = ArchiveWorkflowController(widget.engine);
+    _workflow = ArchiveWorkflowController(
+      widget.engine,
+      compressionPerformance: () => widget.compressionPerformance,
+    );
     _previews = FilePreviewService(
       launcher: widget.fileLauncher ?? DesktopFileLauncher(),
       onChanged: _handlePreviewChanged,
@@ -199,6 +206,8 @@ class _JucierShellState extends State<JucierShell> {
         finderActionService: widget.finderActionService,
         themeMode: widget.themeMode,
         onThemeModeChanged: widget.onThemeModeChanged,
+        compressionPerformance: widget.compressionPerformance,
+        onCompressionPerformanceChanged: widget.onCompressionPerformanceChanged,
         smartExtractionEnabled: widget.smartExtractionEnabled,
         onSmartExtractionChanged: widget.onSmartExtractionChanged,
         singleEntryExtractionMode: widget.singleEntryExtractionMode,

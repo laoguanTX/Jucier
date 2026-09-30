@@ -53,7 +53,9 @@ abstract interface class FinderActionService {
   Future<void> uninstallContextMenu();
 }
 
-/// Receives contextual-menu requests from the bundled macOS Finder extension.
+typedef DesktopFinderActionService = MacOSFinderActionService;
+
+/// Receives contextual-menu requests from Finder and Windows Explorer.
 class MacOSFinderActionService implements FinderActionService {
   MacOSFinderActionService({MethodChannel? channel})
     : _channel = channel ?? const MethodChannel(_channelName);
@@ -128,7 +130,7 @@ class MacOSFinderActionService implements FinderActionService {
         }
       }
     } on MissingPluginException {
-      // Finder actions are only available in the macOS runner.
+      // Other platforms may not implement desktop contextual menus.
     } on PlatformException {
       // A later native event will retry the pending-action drain.
     } finally {

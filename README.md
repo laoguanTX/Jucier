@@ -20,6 +20,12 @@ visible in a compact footer.
 - Browse 7-Zip's supported archive formats with nested folder navigation.
 - Create ZIP, 7z, TAR, GZIP, XZ, BZIP2, WIM, TAR.GZ, and TAR.XZ archives.
 - Compression presets, explicit ZIP AES-256/legacy encryption, split volumes, and encrypted 7z headers.
+- A persistent compression-performance setting shared by macOS and Windows:
+  Balanced retains up to 8 threads and full verification; Speed uses native
+  automatic threading, larger solid blocks for 7z, and skips post-create testing;
+  Save resources limits threads to 2 and uses smaller 7z dictionaries.
+  The setting applies to new archives, including Finder compression; the editable
+  7z preset remains non-solid. Higher parallelism may not help tiny files.
 - Fast incremental additions and an explicit 7z optimization action.
 - Verified replacement of existing archives, exact member selection, cancellable staging, and batched extraction.
 - Extract with overwrite, skip, or automatic rename conflict behavior.
@@ -70,8 +76,19 @@ under `HKEY_CURRENT_USER\Software\Jucier\Preferences`. Ctrl+, opens settings.
 Opening an archive with Jucier through Windows **Open with**, or passing its
 path on the command line, opens the archive directly. Default file associations
 are chosen in Windows system settings; Jucier does not overwrite UserChoice.
-Finder extension installation and dragging members out of an archive remain
-macOS features. Windows users can extract members through the archive actions.
+Windows has a title bar that shares the app background, with native dragging,
+resizing, maximize/restore and Windows 11 Snap Layout hit testing. In Settings,
+install or uninstall **资源管理器右键菜单支持** for the current user (no elevation).
+The Jucier submenu offers ZIP/custom compression for files and folders and
+extract-here/extract-to for supported archives. COM receives the complete
+selection, including Unicode paths, and reuses a running Jucier process.
+On Windows 11 these verbs appear under **Show more options**.
+Registration lives under `HKEY_CURRENT_USER\Software\Classes`; uninstall removes
+only Jucier's two menu trees and four COM registrations. If the app is moved,
+install the menu again from its new location; status detects stale paths.
+Uninstall the menu before deleting the portable app directory.
+Dragging archive members out remains a macOS feature; Windows users can extract
+members through the archive actions.
 
 The macOS runner, Finder extension, bookmark permissions, and native channel
 names retain their existing behavior. Dart desktop services share the native
@@ -114,14 +131,23 @@ a window or launching external apps:
 flutter run -d windows -t tool/windows_platform_smoke.dart --no-pub
 ```
 
+The native Explorer tests cover isolated registry install/repair/uninstall and
+all four COM actions with multi-selection and Unicode paths:
+
+```powershell
+cmake -S tool/windows_native_tests -B build/windows_native_tests -A x64
+cmake --build build/windows_native_tests --config Debug
+ctest --test-dir build/windows_native_tests -C Debug --output-on-failure
+```
+
 7-Zip's redistributed license files are copied to
 `third_party/7zip/licenses` by the download script and must be included with
 release artifacts.
 
 ## Archive operation behavior
 
-- Creating at an existing path replaces the old contents after building and testing
-  the replacement. Old numbered volumes are removed as part of publication;
+- Creating at an existing path replaces the old contents after building the
+  replacement and, unless Speed is selected, testing it. Old numbered volumes are removed as part of publication;
   failures before publication leave the original intact. Publication rolls back
   on ordinary filesystem errors. A multi-volume replacement is not atomic across
   a power failure or process termination.

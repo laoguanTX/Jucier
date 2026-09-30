@@ -94,7 +94,7 @@ Attributes = A
   });
 
   testWidgets(
-    'Windows starts without native open events and hides Finder and bookmark permission controls',
+    'Windows shows Explorer integration and uses system file permissions',
     (tester) async {
       final previousPlatform = debugDefaultTargetPlatformOverride;
       debugDefaultTargetPlatformOverride = TargetPlatform.windows;
@@ -134,6 +134,7 @@ Attributes = A
         await tester.tap(find.text('设置'));
         await tester.pumpAndSettle();
         expect(find.text('Finder 右键菜单支持'), findsNothing);
+        expect(find.text('资源管理器右键菜单支持'), findsOneWidget);
         expect(find.text('由系统管理'), findsOneWidget);
         expect(find.text('使用当前 Windows 用户的文件访问权限。'), findsOneWidget);
         expect(find.text('授权…'), findsNothing);

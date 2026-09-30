@@ -8,6 +8,8 @@ import 'package:jucier/app.dart';
 import 'package:jucier/archive/archive_column.dart';
 import 'package:jucier/archive/archive_engine.dart';
 import 'package:jucier/archive/archive_formats.dart';
+import 'package:jucier/archive/archive_options.dart';
+import 'package:jucier/platform/compression_preference_store.dart';
 import 'package:jucier/platform/archive_file_association_service.dart';
 import 'package:jucier/platform/archive_column_preference_store.dart';
 import 'package:jucier/platform/file_access_service.dart';
@@ -17,6 +19,72 @@ import 'package:jucier/platform/theme_preference_store.dart';
 import 'package:material_ui/material_ui.dart';
 
 void main() {
+  for (final platform in [TargetPlatform.macOS, TargetPlatform.windows]) {
+    testDesktop(
+      'compression preference loads and persists on ${platform.name}',
+      (tester) async {
+        final store = _FakeCompressionPreferenceStore();
+        final permissions = _FakeFileAccessService(
+          initialStatus: const FileAccessStatus(requested: true, granted: true),
+        );
+        await tester.pumpWidget(
+          JucierApp(
+            engine: _UnusedArchiveEngine(),
+            fileAccessService: permissions,
+            themePreferenceStore: _FakeThemePreferenceStore(),
+            compressionPreferenceStore: store,
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('设置'));
+        await tester.pumpAndSettle();
+        final select = find.byKey(
+          const ValueKey('compression-performance-select'),
+        );
+        await tester.ensureVisible(select);
+        await tester.pumpAndSettle();
+        expect(
+          find.text(CompressionPerformance.resourceSaving.description),
+          findsOneWidget,
+        );
+        await tester.tap(select);
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('速度优先').last);
+        await tester.pumpAndSettle();
+        expect(store.saved, [CompressionPerformance.speed]);
+        expect(
+          find.text(CompressionPerformance.speed.description),
+          findsOneWidget,
+        );
+        expect(
+          tester
+              .widget<JucierShell>(find.byType(JucierShell))
+              .compressionPerformance,
+          CompressionPerformance.speed,
+        );
+        // A new app instance must load the saved choice, as on restart.
+        await tester.pumpWidget(const SizedBox());
+        await tester.pumpAndSettle();
+        await tester.pumpWidget(
+          JucierApp(
+            engine: _UnusedArchiveEngine(),
+            fileAccessService: permissions,
+            themePreferenceStore: _FakeThemePreferenceStore(),
+            compressionPreferenceStore: store,
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(
+          tester
+              .widget<JucierShell>(find.byType(JucierShell))
+              .compressionPerformance,
+          CompressionPerformance.speed,
+        );
+        expect(tester.takeException(), isNull);
+      },
+      platform: platform,
+    );
+  }
   testDesktop('smart extraction is enabled by default and can be disabled', (
     tester,
   ) async {
@@ -107,10 +175,12 @@ void main() {
     expect(headerDecoration.color?.a, 1);
 
     final scrollable = tester.state<ScrollableState>(
-      find.descendant(
-        of: find.byKey(const ValueKey('settings-scroll-view')),
-        matching: find.byType(Scrollable),
-      ),
+      find
+          .descendant(
+            of: find.byKey(const ValueKey('settings-scroll-view')),
+            matching: find.byType(Scrollable),
+          )
+          .first,
     );
     expect(scrollable.position.pixels, 0);
 
@@ -253,9 +323,12 @@ void main() {
       FButtonVariant.primary,
     );
 
-    await tester.tap(
-      find.byKey(const ValueKey('single-entry-mode-preserveArchiveStructure')),
+    final preserveMode = find.byKey(
+      const ValueKey('single-entry-mode-preserveArchiveStructure'),
     );
+    await tester.ensureVisible(preserveMode);
+    await tester.pumpAndSettle();
+    await tester.tap(preserveMode);
     await tester.pumpAndSettle();
 
     expect(extractionPreferences.savedModes, [
@@ -446,70 +519,82 @@ void main() {
     );
   });
 
-  testDesktop('offers a Finder context-menu installation action', (
-    tester,
-  ) async {
-    final installation = Completer<void>();
-    final uninstallation = Completer<void>();
-    final finderActions = _FakeFinderMenuService(
-      installed: false,
-      installation: installation,
-      uninstallation: uninstallation,
+  for (final platform in [TargetPlatform.macOS, TargetPlatform.windows]) {
+    testDesktop(
+      'offers context-menu installation and uninstall on ${platform.name}',
+      (tester) async {
+        final installation = Completer<void>();
+        final uninstallation = Completer<void>();
+        final finderActions = _FakeFinderMenuService(
+          installed: false,
+          installation: installation,
+          uninstallation: uninstallation,
+        );
+        final permissions = _FakeFileAccessService(
+          initialStatus: const FileAccessStatus(requested: true, granted: true),
+        );
+
+        await tester.pumpWidget(
+          JucierApp(
+            engine: _UnusedArchiveEngine(),
+            fileAccessService: permissions,
+            themePreferenceStore: _FakeThemePreferenceStore(),
+            finderActionService: finderActions,
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('设置'));
+        await tester.pumpAndSettle();
+
+        final name = platform == TargetPlatform.windows
+            ? '资源管理器右键菜单支持'
+            : 'Finder 右键菜单支持';
+        expect(find.text(name), findsOneWidget);
+        expect(find.text('安装…'), findsOneWidget);
+        await tester.tap(
+          find.byKey(const ValueKey('settings-finder-menu-action')),
+        );
+        await tester.pump();
+
+        expect(find.text('正在安装…'), findsOneWidget);
+        expect(finderActions.repairCalls, 1);
+
+        installation.complete();
+        await tester.pumpAndSettle();
+
+        expect(find.text('已安装'), findsOneWidget);
+        expect(find.text('$name已安装'), findsOneWidget);
+
+        await tester.tap(find.text('好'));
+        await tester.pumpAndSettle();
+        await tester.tap(
+          find.byKey(const ValueKey('settings-finder-menu-uninstall')),
+        );
+        await tester.pump();
+
+        expect(find.text('正在卸载…'), findsOneWidget);
+        expect(finderActions.uninstallCalls, 1);
+
+        uninstallation.complete();
+        await tester.pumpAndSettle();
+
+        expect(find.text('安装…'), findsOneWidget);
+        expect(find.text('$name已卸载'), findsOneWidget);
+      },
+      platform: platform,
     );
-    final permissions = _FakeFileAccessService(
-      initialStatus: const FileAccessStatus(requested: true, granted: true),
-    );
-
-    await tester.pumpWidget(
-      JucierApp(
-        engine: _UnusedArchiveEngine(),
-        fileAccessService: permissions,
-        themePreferenceStore: _FakeThemePreferenceStore(),
-        finderActionService: finderActions,
-      ),
-    );
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('设置'));
-    await tester.pumpAndSettle();
-
-    expect(find.text('Finder 右键菜单支持'), findsOneWidget);
-    expect(find.textContaining('安装 Finder 扩展'), findsOneWidget);
-    expect(find.text('安装…'), findsOneWidget);
-    await tester.tap(find.byKey(const ValueKey('settings-finder-menu-action')));
-    await tester.pump();
-
-    expect(find.text('正在安装…'), findsOneWidget);
-    expect(finderActions.repairCalls, 1);
-
-    installation.complete();
-    await tester.pumpAndSettle();
-
-    expect(find.text('已安装'), findsOneWidget);
-    expect(find.text('Finder 右键菜单支持已安装'), findsOneWidget);
-
-    await tester.tap(find.text('好'));
-    await tester.pumpAndSettle();
-    await tester.tap(
-      find.byKey(const ValueKey('settings-finder-menu-uninstall')),
-    );
-    await tester.pump();
-
-    expect(find.text('正在卸载…'), findsOneWidget);
-    expect(finderActions.uninstallCalls, 1);
-
-    uninstallation.complete();
-    await tester.pumpAndSettle();
-
-    expect(find.text('安装…'), findsOneWidget);
-    expect(find.text('Finder 右键菜单支持已卸载'), findsOneWidget);
-  });
+  }
 }
 
 // Keep the existing Finder/bookmark settings coverage on Windows hosts too.
-void testDesktop(String description, WidgetTesterCallback callback) {
+void testDesktop(
+  String description,
+  WidgetTesterCallback callback, {
+  TargetPlatform platform = TargetPlatform.macOS,
+}) {
   testWidgets(description, (tester) async {
     final previous = debugDefaultTargetPlatformOverride;
-    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+    debugDefaultTargetPlatformOverride = platform;
     try {
       await callback(tester);
     } finally {
@@ -589,6 +674,18 @@ class _FakeFinderMenuService implements FinderActionService {
     uninstallCalls++;
     await uninstallation?.future;
     installed = false;
+  }
+}
+
+class _FakeCompressionPreferenceStore implements CompressionPreferenceStore {
+  CompressionPerformance mode = CompressionPerformance.resourceSaving;
+  final saved = <CompressionPerformance>[];
+  @override
+  Future<CompressionPerformance> load() async => mode;
+  @override
+  Future<void> save(CompressionPerformance performance) async {
+    mode = performance;
+    saved.add(performance);
   }
 }
 

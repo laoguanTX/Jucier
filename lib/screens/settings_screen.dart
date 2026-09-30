@@ -2,10 +2,11 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:forui/forui.dart';
-import 'package:material_ui/material_ui.dart' show ThemeMode;
+import 'package:material_ui/material_ui.dart' show ThemeMode, Tooltip;
 
 import '../archive/archive_column.dart';
 import '../archive/archive_formats.dart';
+import '../archive/archive_options.dart';
 import '../dialogs/archive_columns_dialog.dart';
 import '../dialogs/archive_file_association_dialog.dart';
 import '../dialogs/message_dialog.dart';
@@ -22,6 +23,8 @@ class SettingsScreen extends StatefulWidget {
     required this.themeMode,
     required this.onBack,
     this.onThemeModeChanged,
+    this.compressionPerformance = CompressionPerformance.balanced,
+    this.onCompressionPerformanceChanged,
     this.singleEntryExtractionMode =
         SingleEntryExtractionMode.preserveArchiveStructure,
     this.onSingleEntryExtractionModeChanged,
@@ -37,6 +40,8 @@ class SettingsScreen extends StatefulWidget {
   final FinderActionService finderActionService;
   final ThemeMode themeMode;
   final ValueChanged<ThemeMode>? onThemeModeChanged;
+  final CompressionPerformance compressionPerformance;
+  final ValueChanged<CompressionPerformance>? onCompressionPerformanceChanged;
   final bool smartExtractionEnabled;
   final ValueChanged<bool>? onSmartExtractionChanged;
   final SingleEntryExtractionMode singleEntryExtractionMode;
@@ -52,6 +57,8 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
+  bool get _windows => defaultTargetPlatform == TargetPlatform.windows;
+  String get _contextMenuName => _windows ? '资源管理器右键菜单支持' : 'Finder 右键菜单支持';
   FileAccessStatus? _status;
   ArchiveFileAssociationStatus? _associationStatus;
   bool _requesting = false;
@@ -116,6 +123,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 constraints: const BoxConstraints(maxWidth: 680),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
+                  spacing: 14,
                   children: [
                     _SettingsCard(
                       key: const ValueKey('settings-appearance-card'),
@@ -153,8 +161,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         ),
                       ),
                     ),
-                    const SizedBox(height: 14),
-                    if (_associationStatus?.available == true) ...[
+                    if (_associationStatus?.available == true)
                       _SettingsCard(
                         key: const ValueKey('settings-file-association-card'),
                         icon: FLucideIcons.fileArchive,
@@ -172,14 +179,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           child: Text(_bindingFormats ? '正在绑定…' : '选择格式…'),
                         ),
                       ),
-                      const SizedBox(height: 14),
-                    ],
-                    if (!windows)
+                    if (windows ||
+                        defaultTargetPlatform == TargetPlatform.macOS)
                       _SettingsCard(
                         key: const ValueKey('settings-finder-menu-card'),
                         icon: FLucideIcons.mousePointerClick,
-                        title: 'Finder 右键菜单支持',
-                        description: _finderContextMenuAvailable == true
+                        title: _contextMenuName,
+                        description: windows
+                            ? _finderContextMenuAvailable == true
+                                  ? '右键菜单已安装，可压缩文件和文件夹、解压压缩包。Windows 11 请在“显示更多选项”中使用。'
+                                  : '在当前用户的资源管理器右键菜单中添加 Jucier，无需管理员权限。'
+                            : _finderContextMenuAvailable == true
                             ? 'Finder 扩展已安装，可在文件右键菜单中使用 Jucier。'
                             : '安装 Finder 扩展，在文件右键菜单中显示 Jucier。',
                         trailing: _finderContextMenuAvailable == true
@@ -219,7 +229,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                 ),
                                 size: FButtonSizeVariant.sm,
                                 variant: FButtonVariant.outline,
-                                onPress: _repairingFinderContextMenu
+                                onPress:
+                                    _repairingFinderContextMenu ||
+                                        _finderContextMenuAvailable == null
                                     ? null
                                     : _repairFinderContextMenu,
                                 child: Text(
@@ -227,7 +239,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                 ),
                               ),
                       ),
-                    const SizedBox(height: 14),
                     _SettingsCard(
                       key: const ValueKey('settings-archive-columns-card'),
                       icon: FLucideIcons.listTree,
@@ -266,7 +277,34 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         ),
                       ),
                     ),
-                    const SizedBox(height: 14),
+                    _SettingsCard(
+                      key: const ValueKey(
+                        'settings-compression-performance-card',
+                      ),
+                      icon: FLucideIcons.fileArchive,
+                      title: '压缩性能',
+                      description: widget.compressionPerformance.description,
+                      trailing: SizedBox(
+                        width: 160,
+                        child: FSelect<CompressionPerformance>(
+                          key: const ValueKey('compression-performance-select'),
+                          control: FSelectControl.lifted(
+                            value: widget.compressionPerformance,
+                            onChange: (value) {
+                              if (value != null) {
+                                widget.onCompressionPerformanceChanged?.call(
+                                  value,
+                                );
+                              }
+                            },
+                          ),
+                          items: {
+                            for (final mode in CompressionPerformance.values)
+                              mode.label: mode,
+                          },
+                        ),
+                      ),
+                    ),
                     _SettingsCard(
                       key: const ValueKey('settings-smart-extraction-card'),
                       icon: FLucideIcons.folderOpen,
@@ -278,7 +316,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         onChange: widget.onSmartExtractionChanged,
                       ),
                     ),
-                    const SizedBox(height: 14),
                     _SettingsCard(
                       key: const ValueKey('settings-single-entry-card'),
                       icon: FLucideIcons.fileArchive,
@@ -312,7 +349,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         ),
                       ),
                     ),
-                    const SizedBox(height: 14),
                     _SettingsCard(
                       key: const ValueKey('settings-permission-card'),
                       icon: FLucideIcons.folderOpen,
@@ -421,24 +457,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
         });
         await showMessageDialog(
           context,
-          title: 'Finder 右键菜单支持已安装',
-          message: '已注册并启用“Jucier Finder Extension”。你也可以在系统设置中检查其状态。',
+          title: '$_contextMenuName已安装',
+          message: _windows
+              ? '已添加 Jucier 压缩与解压菜单。Windows 11 请右键后选择“显示更多选项”。移动应用后，请先卸载右键支持，再从新位置安装。'
+              : '已注册并启用“Jucier Finder Extension”。你也可以在系统设置中检查其状态。',
         );
       }
     } on PlatformException catch (error) {
       if (mounted) {
         await showMessageDialog(
           context,
-          title: '无法安装 Finder 右键菜单支持',
-          message: error.message ?? 'macOS 未能注册 Finder 扩展。',
+          title: '无法安装$_contextMenuName',
+          message: error.message ?? '系统未能注册右键菜单。',
         );
       }
     } on MissingPluginException catch (error) {
       if (mounted) {
         await showMessageDialog(
           context,
-          title: '无法安装 Finder 右键菜单支持',
-          message: error.message ?? '当前版本缺少 Finder 扩展安装接口。',
+          title: '无法安装$_contextMenuName',
+          message: error.message ?? '当前版本缺少右键菜单安装接口。',
         );
       }
     } finally {
@@ -457,24 +495,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
         });
         await showMessageDialog(
           context,
-          title: 'Finder 右键菜单支持已卸载',
-          message: 'Jucier Finder Extension 已停用并从扩展注册表移除。',
+          title: '$_contextMenuName已卸载',
+          message: _windows
+              ? '已移除当前用户的 Jucier 右键菜单及其注册信息。'
+              : 'Jucier Finder Extension 已停用并从扩展注册表移除。',
         );
       }
     } on PlatformException catch (error) {
       if (mounted) {
         await showMessageDialog(
           context,
-          title: '无法卸载 Finder 右键菜单支持',
-          message: error.message ?? 'macOS 未能卸载 Finder 扩展。',
+          title: '无法卸载$_contextMenuName',
+          message: error.message ?? '系统未能卸载右键菜单。',
         );
       }
     } on MissingPluginException catch (error) {
       if (mounted) {
         await showMessageDialog(
           context,
-          title: '无法卸载 Finder 右键菜单支持',
-          message: error.message ?? '当前版本缺少 Finder 扩展卸载接口。',
+          title: '无法卸载$_contextMenuName',
+          message: error.message ?? '当前版本缺少右键菜单卸载接口。',
         );
       }
     } finally {
@@ -543,6 +583,7 @@ class _SettingsCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.theme.colors;
     return Container(
+      height: 104,
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
       decoration: BoxDecoration(
         color: colors.background,
@@ -569,15 +610,22 @@ class _SettingsCard extends StatelessWidget {
               children: [
                 Text(
                   title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: context.theme.typography.body.lg.copyWith(
                     fontWeight: FontWeight.w600,
                   ),
                 ),
                 const SizedBox(height: 6),
-                Text(
-                  description,
-                  style: context.theme.typography.body.sm.copyWith(
-                    color: colors.mutedForeground,
+                Tooltip(
+                  message: description,
+                  child: Text(
+                    description,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: context.theme.typography.body.sm.copyWith(
+                      color: colors.mutedForeground,
+                    ),
                   ),
                 ),
               ],

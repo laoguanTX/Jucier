@@ -9,6 +9,7 @@ import 'archive_engine.dart';
 import 'archive_entry.dart';
 import 'archive_options.dart';
 import 'archive_path.dart';
+import 'compression_policy.dart';
 import '../platform/seven_zip_runtime.dart';
 
 class SevenZipEngine implements ArchiveEngine, ArchiveOperationEvents {
@@ -260,13 +261,15 @@ class SevenZipEngine implements ArchiveEngine, ArchiveOperationEvents {
         ], onProgress: _scaleProgress(onProgress, 0, 0.2));
         sources = [tar];
       }
-      final threads =
-          options.maxThreads ?? Platform.numberOfProcessors.clamp(1, 8);
+      final verify = options.performance != CompressionPerformance.speed;
+      final compressionEnd = verify ? 0.9 : 0.99;
       final args = <String>[
         'a',
         '-t${options.format.sevenZipType}',
-        '-mx=${options.compressionLevel}',
-        '-mmt=$threads',
+        ...compressionMethodArguments(
+          options,
+          processorCount: Platform.numberOfProcessors,
+        ),
         '-y',
         '-bsp1',
         '-bb0',
@@ -274,15 +277,6 @@ class SevenZipEngine implements ArchiveEngine, ArchiveOperationEvents {
       ];
       if (Platform.isMacOS && options.format.supportsSymbolicLinks) {
         args.add('-snl');
-      }
-      if (options.format == ArchiveFormat.sevenZip &&
-          options.compressionLevel > 0) {
-        args.addAll(switch (options.preset) {
-          CompressionPreset.compact => ['-md=32m', '-ms=256m', '-mqs=on'],
-          CompressionPreset.editable => ['-md=16m', '-ms=off'],
-          CompressionPreset.fast => ['-md=8m', '-ms=64m'],
-          CompressionPreset.balanced => ['-md=16m', '-ms=128m'],
-        });
       }
       if (options.password case final password? when password.isNotEmpty) {
         args.add('-p$password');
@@ -299,16 +293,18 @@ class SevenZipEngine implements ArchiveEngine, ArchiveOperationEvents {
       final start = options.format.usesTarContainer ? 0.2 : 0.0;
       await _run(
         args,
-        onProgress: _scaleProgress(onProgress, start, 0.9 - start),
+        onProgress: _scaleProgress(onProgress, start, compressionEnd - start),
       );
-      final firstOutput = volume?.isNotEmpty == true ? '$output.001' : output;
-      await _run([
-        't',
-        firstOutput,
-        '-bsp1',
-        '-bb0',
-        if (options.password?.isNotEmpty == true) '-p${options.password}',
-      ], onProgress: _scaleProgress(onProgress, 0.9, 0.09));
+      if (verify) {
+        final firstOutput = volume?.isNotEmpty == true ? '$output.001' : output;
+        await _run([
+          't',
+          firstOutput,
+          '-bsp1',
+          '-bb0',
+          if (options.password?.isNotEmpty == true) '-p${options.password}',
+        ], onProgress: _scaleProgress(onProgress, 0.9, 0.09));
+      }
       _checkCancelled();
       await _installArchiveOutputs(
         workspace,

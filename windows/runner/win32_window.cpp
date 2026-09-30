@@ -2,6 +2,8 @@
 
 #include <dwmapi.h>
 #include <flutter_windows.h>
+#include <commctrl.h>
+#include <windowsx.h>
 
 #include "resource.h"
 
@@ -17,6 +19,53 @@ namespace {
 #endif
 
 constexpr const wchar_t kWindowClassName[] = L"FLUTTER_RUNNER_WIN32_WINDOW";
+
+// Keep these logical dimensions aligned with WindowsTitleBar in Dart.
+constexpr int kTitleBarHeight = 32;
+constexpr int kCaptionButtonWidth = 46;
+
+LRESULT FrameHitTest(HWND window, LPARAM position) {
+  POINT point{GET_X_LPARAM(position), GET_Y_LPARAM(position)};
+  ScreenToClient(window, &point);
+  RECT client{};
+  GetClientRect(window, &client);
+  const UINT dpi = GetDpiForWindow(window);
+  const int border = GetSystemMetricsForDpi(SM_CXSIZEFRAME, dpi) +
+                     GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi);
+  if (!IsZoomed(window)) {
+    const bool left = point.x < border;
+    const bool right = point.x >= client.right - border;
+    const bool top = point.y < border;
+    const bool bottom = point.y >= client.bottom - border;
+    if (top && left) return HTTOPLEFT;
+    if (top && right) return HTTOPRIGHT;
+    if (bottom && left) return HTBOTTOMLEFT;
+    if (bottom && right) return HTBOTTOMRIGHT;
+    if (left) return HTLEFT;
+    if (right) return HTRIGHT;
+    if (top) return HTTOP;
+    if (bottom) return HTBOTTOM;
+  }
+  const int title_height = MulDiv(kTitleBarHeight, dpi, 96);
+  const int button_width = MulDiv(kCaptionButtonWidth, dpi, 96);
+  if (point.y >= 0 && point.y < title_height) {
+    // Native maximize hit testing enables the Windows 11 Snap Layout flyout.
+    if (point.x >= client.right - 2 * button_width &&
+        point.x < client.right - button_width) return HTMAXBUTTON;
+    if (point.x < client.right - 3 * button_width) return HTCAPTION;
+  }
+  return HTCLIENT;
+}
+
+LRESULT CALLBACK ContentSubclass(HWND child, UINT message, WPARAM wparam,
+                                LPARAM lparam, UINT_PTR id, DWORD_PTR) {
+  if (message == WM_NCHITTEST && FrameHitTest(GetParent(child), lparam) != HTCLIENT) {
+    // Route frame interactions through the parent even though Flutter fills it.
+    return HTTRANSPARENT;
+  }
+  if (message == WM_NCDESTROY) RemoveWindowSubclass(child, ContentSubclass, id);
+  return DefSubclassProc(child, message, wparam, lparam);
+}
 
 /// Registry key for app theme preference.
 ///
@@ -145,6 +194,10 @@ bool Win32Window::Create(const std::wstring& title,
   }
 
   UpdateTheme(window);
+  const MARGINS margins{1, 1, 1, 1};
+  DwmExtendFrameIntoClientArea(window, &margins);
+  SetWindowPos(window, nullptr, 0, 0, 0, 0,
+               SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
 
   return OnCreate();
 }
@@ -179,6 +232,40 @@ Win32Window::MessageHandler(HWND hwnd,
                             WPARAM const wparam,
                             LPARAM const lparam) noexcept {
   switch (message) {
+    case WM_NCCALCSIZE:
+      if (wparam) {
+        if (IsZoomed(hwnd)) {
+          MONITORINFO monitor{sizeof(MONITORINFO)};
+          if (GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &monitor)) {
+            reinterpret_cast<NCCALCSIZE_PARAMS*>(lparam)->rgrc[0] = monitor.rcWork;
+          }
+        }
+        return 0;
+      }
+      break;
+    case WM_NCHITTEST:
+      return FrameHitTest(hwnd, lparam);
+    case WM_NCLBUTTONDOWN:
+      if (wparam == HTMAXBUTTON) return 0;
+      break;
+    case WM_NCLBUTTONUP:
+      if (wparam == HTMAXBUTTON) {
+        ShowWindow(hwnd, IsZoomed(hwnd) ? SW_RESTORE : SW_MAXIMIZE);
+        return 0;
+      }
+      break;
+    case WM_NCMOUSEMOVE:
+    case WM_NCMOUSELEAVE: {
+      LRESULT result = 0;
+      if (DwmDefWindowProc(hwnd, message, wparam, lparam, &result)) return result;
+      break;
+    }
+    case WM_GETMINMAXINFO: {
+      auto* info = reinterpret_cast<MINMAXINFO*>(lparam);
+      const auto dpi = GetDpiForWindow(hwnd);
+      info->ptMinTrackSize = {MulDiv(520, dpi, 96), MulDiv(360, dpi, 96)};
+      return 0;
+    }
     case WM_DESTROY:
       window_handle_ = nullptr;
       Destroy();
@@ -241,6 +328,7 @@ Win32Window* Win32Window::GetThisFromHandle(HWND const window) noexcept {
 void Win32Window::SetChildContent(HWND content) {
   child_content_ = content;
   SetParent(content, window_handle_);
+  SetWindowSubclass(content, ContentSubclass, 1, 0);
   RECT frame = GetClientArea();
 
   MoveWindow(content, frame.left, frame.top, frame.right - frame.left,

@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:forui/forui.dart';
 import 'package:jucier/app.dart';
@@ -9,6 +10,52 @@ import 'package:jucier/platform/theme_preference_store.dart';
 import 'package:material_ui/material_ui.dart' show ThemeMode;
 
 void main() {
+  testWidgets('Windows title bar controls dispatch native window actions', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+    try {
+      const channel = MethodChannel('dev.jucier/window');
+      final calls = <String>[];
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, (
+        call,
+      ) async {
+        calls.add(call.method);
+        return call.method == 'windowState' ? false : null;
+      });
+      addTearDown(
+        () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          channel,
+          null,
+        ),
+      );
+      await tester.pumpWidget(
+        JucierApp(
+          engine: _UnusedArchiveEngine(),
+          fileAccessService: _FakeFileAccessService(
+            initialStatus: const FileAccessStatus(
+              requested: true,
+              granted: true,
+            ),
+          ),
+          themePreferenceStore: _FakeThemePreferenceStore(),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        tester.getSize(find.byKey(const ValueKey('windows-title-bar'))).height,
+        32,
+      );
+      expect(tester.getRect(find.text('Jucier')).top, greaterThanOrEqualTo(32));
+      for (final method in ['minimize', 'toggleMaximize', 'close']) {
+        await tester.tap(find.byKey(ValueKey('window-$method')));
+        await tester.pump();
+      }
+      expect(calls, ['windowState', 'minimize', 'toggleMaximize', 'close']);
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
+  });
   testWidgets('create archive opens the reusable compose file tree', (
     tester,
   ) async {

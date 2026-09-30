@@ -306,6 +306,16 @@ class MainFlutterWindow: NSWindow {
         self.openFile(call.arguments, result: result)
       case "smartExtractionEnabled":
         result(UserDefaults.standard.object(forKey: "smartExtractionEnabled") as? Bool ?? true)
+      case "compressionPerformance":
+        result(UserDefaults.standard.string(forKey: "compressionPerformance") ?? "balanced")
+      case "setCompressionPerformance":
+        guard let mode = call.arguments as? String,
+          ["balanced", "speed", "resourceSaving"].contains(mode) else {
+          result(FlutterError(code: "invalid_preference", message: "无效的压缩性能设置", details: nil))
+          return
+        }
+        UserDefaults.standard.set(mode, forKey: "compressionPerformance")
+        result(nil)
       case "setSmartExtractionEnabled":
         guard let enabled = call.arguments as? Bool else {
           result(FlutterError(code: "invalid_preference", message: "无效的智能解压设置", details: nil))

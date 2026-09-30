@@ -24,6 +24,12 @@ dev_dependencies:
 flutter:
   uses-material-design: true
 
+  fonts:
+    - family: HarmonyOS Sans SC
+      fonts:
+        - asset: assets/fonts/HarmonyOS_Sans_SC_Regular.ttf
+          weight: 400
+
   assets:
     - assets/sevenzip/
     - assets/sevenzip/windows/

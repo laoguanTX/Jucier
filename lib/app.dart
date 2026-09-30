@@ -1,20 +1,42 @@
+import 'package:flutter/foundation.dart';
 import 'package:forui/forui.dart';
 import 'package:material_ui/material_ui.dart';
 
 import 'application/jucier_shell.dart';
 import 'archive/archive_column.dart';
 import 'archive/archive_engine.dart';
+import 'archive/archive_options.dart';
 import 'archive/seven_zip_engine.dart';
 import 'platform/archive_file_association_service.dart';
 import 'platform/archive_open_service.dart';
 import 'platform/file_access_service.dart';
 import 'platform/finder_action_service.dart';
+import 'widgets/windows_title_bar.dart';
 import 'platform/archive_column_preference_store.dart';
 import 'platform/single_entry_extraction_preference_store.dart';
 import 'platform/theme_preference_store.dart';
 import 'platform/smart_extraction_preference_store.dart';
+import 'platform/compression_preference_store.dart';
 
 export 'application/jucier_shell.dart' show JucierShell;
+
+final _lightDesktopTheme = _desktopTheme(FColors.neutralLight);
+final _darkDesktopTheme = _desktopTheme(FColors.neutralDark);
+
+FThemeData _desktopTheme(FColors colors) {
+  final typeface = FTypeface.inherit(
+    colors: colors,
+    touch: false,
+    fontFamily: 'HarmonyOS Sans SC',
+  );
+  // Construct the theme with typography so all component styles inherit it.
+  // The Material mapping below uses the same typeface.
+  return FThemeData(
+    colors: colors,
+    touch: false,
+    typography: FTypography(display: typeface, body: typeface),
+  );
+}
 
 /// Configures global theming and wires the app's platform dependencies.
 class JucierApp extends StatefulWidget {
@@ -23,6 +45,7 @@ class JucierApp extends StatefulWidget {
     this.engine,
     this.fileAccessService,
     this.themePreferenceStore,
+    this.compressionPreferenceStore,
     this.singleEntryExtractionPreferenceStore,
     this.archiveColumnPreferenceStore,
     this.archiveFileAssociationService,
@@ -34,6 +57,7 @@ class JucierApp extends StatefulWidget {
   final ArchiveEngine? engine;
   final FileAccessService? fileAccessService;
   final ThemePreferenceStore? themePreferenceStore;
+  final CompressionPreferenceStore? compressionPreferenceStore;
   final SingleEntryExtractionPreferenceStore?
   singleEntryExtractionPreferenceStore;
   final ArchiveColumnPreferenceStore? archiveColumnPreferenceStore;
@@ -50,6 +74,10 @@ class _JucierAppState extends State<JucierApp> {
   late final ArchiveEngine _engine;
   late final FileAccessService _fileAccessService;
   late final ThemePreferenceStore _themePreferenceStore;
+  late final CompressionPreferenceStore _compressionPreferenceStore;
+  CompressionPerformance _compressionPerformance =
+      CompressionPerformance.balanced;
+  bool _compressionChangedByUser = false;
   late final SingleEntryExtractionPreferenceStore
   _singleEntryExtractionPreferenceStore;
   late final ArchiveColumnPreferenceStore _archiveColumnPreferenceStore;
@@ -75,6 +103,9 @@ class _JucierAppState extends State<JucierApp> {
     _fileAccessService = widget.fileAccessService ?? DesktopFileAccessService();
     _themePreferenceStore =
         widget.themePreferenceStore ?? DesktopThemePreferenceStore();
+    _compressionPreferenceStore =
+        widget.compressionPreferenceStore ??
+        DesktopCompressionPreferenceStore();
     _singleEntryExtractionPreferenceStore =
         widget.singleEntryExtractionPreferenceStore ??
         DesktopSingleEntryExtractionPreferenceStore();
@@ -87,8 +118,9 @@ class _JucierAppState extends State<JucierApp> {
     _archiveOpenService =
         widget.archiveOpenService ?? DesktopArchiveOpenService();
     _finderActionService =
-        widget.finderActionService ?? MacOSFinderActionService();
+        widget.finderActionService ?? DesktopFinderActionService();
     _loadSmartExtraction();
+    _loadCompressionPerformance();
     _loadThemeMode();
     _loadSingleEntryExtractionMode();
     _loadArchiveColumnPreferences();
@@ -99,6 +131,20 @@ class _JucierAppState extends State<JucierApp> {
     if (mounted && !_smartExtractionChangedByUser) {
       setState(() => _smartExtractionEnabled = enabled);
     }
+  }
+
+  Future<void> _loadCompressionPerformance() async {
+    final performance = await _compressionPreferenceStore.load();
+    if (mounted && !_compressionChangedByUser) {
+      setState(() => _compressionPerformance = performance);
+    }
+  }
+
+  void _setCompressionPerformance(CompressionPerformance performance) {
+    if (_compressionPerformance == performance) return;
+    _compressionChangedByUser = true;
+    setState(() => _compressionPerformance = performance);
+    _compressionPreferenceStore.save(performance);
   }
 
   void _setSmartExtraction(bool enabled) {
@@ -150,8 +196,8 @@ class _JucierAppState extends State<JucierApp> {
 
   @override
   Widget build(BuildContext context) {
-    final light = FTheme.neutral.light.desktop;
-    final dark = FTheme.neutral.dark.desktop;
+    final light = _lightDesktopTheme;
+    final dark = _darkDesktopTheme;
 
     return MaterialApp(
       title: 'Jucier',
@@ -173,7 +219,18 @@ class _JucierAppState extends State<JucierApp> {
             child: FTooltipGroup(
               // Archive forms use a few Material controls. Forui scaffolds
               // and dialogs do not insert a Material ancestor themselves.
-              child: Material(type: MaterialType.transparency, child: child!),
+              child: Material(
+                type: MaterialType.transparency,
+                child:
+                    !kIsWeb && defaultTargetPlatform == TargetPlatform.windows
+                    ? Column(
+                        children: [
+                          const WindowsTitleBar(),
+                          Expanded(child: child!),
+                        ],
+                      )
+                    : child!,
+              ),
             ),
           ),
         );
@@ -187,6 +244,8 @@ class _JucierAppState extends State<JucierApp> {
         waitForInitialArchiveOpen: widget.waitForInitialArchiveOpen,
         themeMode: _themeMode,
         onThemeModeChanged: _setThemeMode,
+        compressionPerformance: _compressionPerformance,
+        onCompressionPerformanceChanged: _setCompressionPerformance,
         smartExtractionEnabled: _smartExtractionEnabled,
         onSmartExtractionChanged: _setSmartExtraction,
         singleEntryExtractionMode: _singleEntryExtractionMode,

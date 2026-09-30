@@ -8,6 +8,43 @@ import 'package:jucier/archive/archive_options.dart';
 
 void main() {
   test(
+    'applies current compression preference to dialog and direct creates',
+    () async {
+      final engine = _ImmediateArchiveEngine();
+      var mode = CompressionPerformance.speed;
+      final controller = ArchiveWorkflowController(
+        engine,
+        compressionPerformance: () => mode,
+      );
+      addTearDown(controller.dispose);
+      const options = CreateArchiveOptions(
+        archivePath: '/tmp/output.7z',
+        sources: ['/tmp/input'],
+        format: ArchiveFormat.sevenZip,
+        preset: CompressionPreset.editable,
+        compressionLevel: 7,
+        password: 'secret',
+        volumeSize: '10m',
+        zipEncryption: ZipEncryption.compatible,
+        maxThreads: 3,
+      );
+      await controller.create(options);
+      expect(engine.lastCreated?.performance, CompressionPerformance.speed);
+      expect(engine.lastCreated?.preset, options.preset);
+      expect(engine.lastCreated?.password, options.password);
+      expect(engine.lastCreated?.volumeSize, options.volumeSize);
+      expect(engine.lastCreated?.compressionLevel, options.compressionLevel);
+      expect(engine.lastCreated?.zipEncryption, options.zipEncryption);
+      expect(engine.lastCreated?.maxThreads, options.maxThreads);
+      mode = CompressionPerformance.resourceSaving;
+      await controller.create(options, openAfterCreate: false);
+      expect(
+        engine.lastCreated?.performance,
+        CompressionPerformance.resourceSaving,
+      );
+    },
+  );
+  test(
     'owns archive state and clears operation state after completion',
     () async {
       final engine = _FakeArchiveEngine();
@@ -134,6 +171,7 @@ class _FakeArchiveEngine implements ArchiveEngine {
 }
 
 class _ImmediateArchiveEngine implements ArchiveEngine {
+  CreateArchiveOptions? lastCreated;
   int createCalls = 0;
   int listCalls = 0;
 
@@ -143,6 +181,7 @@ class _ImmediateArchiveEngine implements ArchiveEngine {
     ProgressCallback? onProgress,
   }) async {
     createCalls++;
+    lastCreated = options;
   }
 
   @override

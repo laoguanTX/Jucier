@@ -94,6 +94,16 @@ enum ZipEncryption {
   final String method;
 }
 
+enum CompressionPerformance {
+  balanced('均衡', '新建压缩包时适度使用系统资源，完成后进行完整校验。'),
+  speed('速度优先', '新建压缩包时充分使用系统资源，跳过完成后的完整校验；7z 单文件预览和修改可能更慢。'),
+  resourceSaving('节省资源', '新建压缩包时减少处理器和内存占用，保留完整校验，压缩可能更慢。');
+
+  const CompressionPerformance(this.label, this.description);
+  final String label;
+  final String description;
+}
+
 class CreateArchiveOptions {
   const CreateArchiveOptions({
     required this.archivePath,
@@ -103,6 +113,7 @@ class CreateArchiveOptions {
     this.preset = CompressionPreset.balanced,
     this.zipEncryption = ZipEncryption.aes256,
     this.maxThreads,
+    this.performance = CompressionPerformance.balanced,
     this.password,
     this.volumeSize,
   });
@@ -114,8 +125,23 @@ class CreateArchiveOptions {
   final CompressionPreset preset;
   final ZipEncryption zipEncryption;
   final int? maxThreads;
+  final CompressionPerformance performance;
   final String? password;
   final String? volumeSize;
+
+  CreateArchiveOptions withPerformance(CompressionPerformance performance) =>
+      CreateArchiveOptions(
+        archivePath: archivePath,
+        sources: sources,
+        format: format,
+        compressionLevel: compressionLevel,
+        preset: preset,
+        zipEncryption: zipEncryption,
+        maxThreads: maxThreads,
+        performance: performance,
+        password: password,
+        volumeSize: volumeSize,
+      );
 }
 
 class ExtractArchiveOptions {

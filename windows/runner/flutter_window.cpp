@@ -1,6 +1,7 @@
 #include "flutter_window.h"
 
 #include <optional>
+#include <algorithm>
 
 #include "flutter/generated_plugin_registrant.h"
 
@@ -31,8 +32,14 @@ bool FlutterWindow::OnCreate() {
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
-    this->Show();
+    if (std::find(arguments_.begin(), arguments_.end(), "--shell-server") == arguments_.end()) {
+      this->Show();
+    }
   });
+  if (std::find(arguments_.begin(), arguments_.end(), "--shell-server") != arguments_.end()) {
+    // Close an unused COM activation instead of leaving an invisible process.
+    SetTimer(GetHandle(), 1, 30000, nullptr);
+  }
 
   // Flutter can complete the first frame before the "show window" callback is
   // registered. The following call ensures a frame is pending to ensure the
@@ -55,6 +62,12 @@ LRESULT
 FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
                               WPARAM const wparam,
                               LPARAM const lparam) noexcept {
+  if (message == WM_SIZE && platform_services_) platform_services_->NotifyWindowState();
+  if (message == WM_TIMER && wparam == 1) {
+    KillTimer(hwnd, 1);
+    PostMessageW(hwnd, WM_CLOSE, 0, 0);
+    return 0;
+  }
   // Give Flutter, including plugins, an opportunity to handle window messages.
   if (flutter_controller_) {
     std::optional<LRESULT> result =

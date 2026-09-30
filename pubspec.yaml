@@ -1,5 +1,5 @@
 name: jucier
-description: "A focused, native-feeling archive utility for macOS."
+description: "A focused, native-feeling archive utility for macOS and Windows."
 publish_to: 'none'
 version: 0.1.0+1
 
@@ -26,4 +26,5 @@ flutter:
 
   assets:
     - assets/sevenzip/
+    - assets/sevenzip/windows/
     - assets/sevenzip/licenses/

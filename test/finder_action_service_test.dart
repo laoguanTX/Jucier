@@ -1,4 +1,7 @@
 import 'dart:async';
+
+import 'package:path/path.dart' as p;
+
 import 'dart:io';
 
 import 'package:flutter/widgets.dart';
@@ -132,7 +135,10 @@ void main() {
     await tester.pump(const Duration(milliseconds: 400));
 
     expect(engine.creations, hasLength(1));
-    expect(engine.creations.single.archivePath, '${directory.path}/notes.zip');
+    expect(
+      engine.creations.single.archivePath,
+      p.join(directory.path, 'notes.zip'),
+    );
     expect(engine.creations.single.sources, [source.path]);
     expect(engine.creations.single.format, ArchiveFormat.zip);
     expect(engine.listCalls, isEmpty);

@@ -56,7 +56,7 @@ class _JucierAppState extends State<JucierApp> {
   late final ArchiveFileAssociationService _archiveFileAssociationService;
   late final ArchiveOpenService _archiveOpenService;
   late final FinderActionService _finderActionService;
-  final _smartExtractionStore = MacOSSmartExtractionPreferenceStore();
+  final _smartExtractionStore = DesktopSmartExtractionPreferenceStore();
   bool _smartExtractionEnabled = true;
   bool _smartExtractionChangedByUser = false;
   ThemeMode _themeMode = ThemeMode.system;
@@ -72,20 +72,20 @@ class _JucierAppState extends State<JucierApp> {
   void initState() {
     super.initState();
     _engine = widget.engine ?? SevenZipEngine();
-    _fileAccessService = widget.fileAccessService ?? MacOSFileAccessService();
+    _fileAccessService = widget.fileAccessService ?? DesktopFileAccessService();
     _themePreferenceStore =
-        widget.themePreferenceStore ?? MacOSThemePreferenceStore();
+        widget.themePreferenceStore ?? DesktopThemePreferenceStore();
     _singleEntryExtractionPreferenceStore =
         widget.singleEntryExtractionPreferenceStore ??
-        MacOSSingleEntryExtractionPreferenceStore();
+        DesktopSingleEntryExtractionPreferenceStore();
     _archiveColumnPreferenceStore =
         widget.archiveColumnPreferenceStore ??
-        MacOSArchiveColumnPreferenceStore();
+        DesktopArchiveColumnPreferenceStore();
     _archiveFileAssociationService =
         widget.archiveFileAssociationService ??
         MacOSArchiveFileAssociationService();
     _archiveOpenService =
-        widget.archiveOpenService ?? MacOSArchiveOpenService();
+        widget.archiveOpenService ?? DesktopArchiveOpenService();
     _finderActionService =
         widget.finderActionService ?? MacOSFinderActionService();
     _loadSmartExtraction();

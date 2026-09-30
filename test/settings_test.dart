@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:forui/forui.dart';
 import 'package:jucier/app.dart';
@@ -16,7 +17,7 @@ import 'package:jucier/platform/theme_preference_store.dart';
 import 'package:material_ui/material_ui.dart';
 
 void main() {
-  testWidgets('smart extraction is enabled by default and can be disabled', (
+  testDesktop('smart extraction is enabled by default and can be disabled', (
     tester,
   ) async {
     bool? saved;
@@ -52,7 +53,7 @@ void main() {
     expect(saved, isFalse);
   });
 
-  testWidgets('requests file access on first launch and opens settings', (
+  testDesktop('requests file access on first launch and opens settings', (
     tester,
   ) async {
     final permissions = _FakeFileAccessService();
@@ -119,11 +120,11 @@ void main() {
     expect(icon.size, 22);
 
     final backButton = find.byKey(const ValueKey('settings-back-button'));
-    expect(tester.getTopLeft(backButton), const Offset(24, 24));
+    expect(tester.getTopLeft(backButton), const Offset(24, 50));
     expect(tester.getSize(backButton).width, lessThan(120));
   });
 
-  testWidgets('Command-comma opens the secondary settings page', (
+  testDesktop('Command-comma opens the secondary settings page', (
     tester,
   ) async {
     final permissions = _FakeFileAccessService(
@@ -157,7 +158,7 @@ void main() {
     expect(permissions.requestCount, 0);
   });
 
-  testWidgets('native settings command opens the same page', (tester) async {
+  testDesktop('native settings command opens the same page', (tester) async {
     final permissions = _FakeFileAccessService(
       initialStatus: const FileAccessStatus(requested: true, granted: false),
     );
@@ -177,7 +178,7 @@ void main() {
     expect(find.text('文件与文件夹访问'), findsOneWidget);
   });
 
-  testWidgets('loads, switches, and persists the selected appearance', (
+  testDesktop('loads, switches, and persists the selected appearance', (
     tester,
   ) async {
     final preferences = _FakeThemePreferenceStore(ThemeMode.dark);
@@ -219,7 +220,7 @@ void main() {
     );
   });
 
-  testWidgets('loads, switches, and persists the single-entry mode', (
+  testDesktop('loads, switches, and persists the single-entry mode', (
     tester,
   ) async {
     final extractionPreferences = _FakeSingleEntryExtractionPreferenceStore(
@@ -263,7 +264,7 @@ void main() {
     expect(find.text('单独解压时保留压缩包中的完整父目录。'), findsOneWidget);
   });
 
-  testWidgets('configures and persists compression file-tree columns', (
+  testDesktop('configures and persists compression file-tree columns', (
     tester,
   ) async {
     final columnPreferences = _FakeArchiveColumnPreferenceStore();
@@ -358,7 +359,7 @@ void main() {
     );
   });
 
-  testWidgets('selects all archive formats to make Jucier the default app', (
+  testDesktop('selects all archive formats to make Jucier the default app', (
     tester,
   ) async {
     tester.view.physicalSize = const Size(860, 620);
@@ -445,7 +446,7 @@ void main() {
     );
   });
 
-  testWidgets('offers a Finder context-menu installation action', (
+  testDesktop('offers a Finder context-menu installation action', (
     tester,
   ) async {
     final installation = Completer<void>();
@@ -501,6 +502,19 @@ void main() {
 
     expect(find.text('安装…'), findsOneWidget);
     expect(find.text('Finder 右键菜单支持已卸载'), findsOneWidget);
+  });
+}
+
+// Keep the existing Finder/bookmark settings coverage on Windows hosts too.
+void testDesktop(String description, WidgetTesterCallback callback) {
+  testWidgets(description, (tester) async {
+    final previous = debugDefaultTargetPlatformOverride;
+    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+    try {
+      await callback(tester);
+    } finally {
+      debugDefaultTargetPlatformOverride = previous;
+    }
   });
 }
 

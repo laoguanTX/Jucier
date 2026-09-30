@@ -11,8 +11,10 @@ abstract interface class FileLauncher {
   Future<void> open(String path);
 }
 
-class MacOSFileLauncher implements FileLauncher {
-  MacOSFileLauncher({MethodChannel? channel})
+typedef MacOSFileLauncher = DesktopFileLauncher;
+
+class DesktopFileLauncher implements FileLauncher {
+  DesktopFileLauncher({MethodChannel? channel})
     : _channel = channel ?? const MethodChannel('dev.jucier/platform');
 
   final MethodChannel _channel;

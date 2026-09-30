@@ -1,7 +1,7 @@
 # jucier
 
-A focused macOS archive utility built with Flutter, Forui, and the official
-7-Zip source. Jucier intentionally uses a single-window workflow: drop files to
+A focused macOS and Windows archive utility built with Flutter, Forui, and
+official 7-Zip runtimes. Jucier uses a single-window workflow: drop files to
 create an archive, drop an archive to browse it, and keep the current operation
 visible in a compact footer.
 
@@ -25,13 +25,57 @@ visible in a compact footer.
 - Extract with overwrite, skip, or automatic rename conflict behavior.
 - Smart extraction is enabled by default and can be disabled in Settings. Whole-archive extraction wraps multiple top-level items in an archive-named folder; a single file or existing top-level folder is extracted directly.
 - Test archive integrity, show progress, and cancel the active operation.
-- Drag and drop plus native macOS open/save panels.
+- Drag and drop into the app plus native desktop open/save panels.
+- Native default-app previews and persistent settings on macOS and Windows.
 - System, light, and dark desktop themes with a persistent appearance setting.
 
 ## Requirements
 
 - Flutter 3.47 or newer.
 - macOS with Xcode Command Line Tools.
+- For Windows x64: Windows 10/11 and Visual Studio with the Desktop development
+  with C++ workload and Windows SDK (required only for building).
+
+## Build on Windows
+
+From the project root, prepare the full Windows 7-Zip runtime:
+
+```powershell
+pwsh -File tool/prepare_7zip_windows.ps1
+flutter run -d windows
+flutter build windows --release
+```
+
+The script verifies pinned SHA-256 hashes, extracts the official installer
+without installing it into Windows, and copies `7z.exe`, `7z.dll`, and license
+files into Flutter assets. The runtime release and checksums are recorded in
+`third_party/7zip/WINDOWS_RUNTIME.json`. Downloads use the [official 7-Zip
+GitHub releases](https://github.com/ip7z/7zip/releases), linked from the
+[7-Zip download page](https://www.7-zip.org/download.html).
+
+To use an existing installation instead:
+
+```powershell
+pwsh -File tool/prepare_7zip_windows.ps1 -SevenZipDirectory 'C:\Program Files\7-Zip'
+```
+
+Distribute the **entire** `build/windows/x64/runner/Release` directory, including
+`data` and DLLs. The packaged engine is located relative to the application,
+so launching from Explorer or a different working directory does not require
+an installed 7-Zip or a configured PATH. `JUCIER_7ZZ_PATH` remains available
+as a development override on both platforms.
+
+Windows uses the current user's filesystem permissions and stores preferences
+under `HKEY_CURRENT_USER\Software\Jucier\Preferences`. Ctrl+, opens settings.
+Opening an archive with Jucier through Windows **Open with**, or passing its
+path on the command line, opens the archive directly. Default file associations
+are chosen in Windows system settings; Jucier does not overwrite UserChoice.
+Finder extension installation and dragging members out of an archive remain
+macOS features. Windows users can extract members through the archive actions.
+
+The macOS runner, Finder extension, bookmark permissions, and native channel
+names retain their existing behavior. Dart desktop services share the native
+channel contract; the previous `MacOS*` class names remain compatible aliases.
 
 ## Build 7-Zip from source
 
@@ -58,6 +102,16 @@ executable.
 ```sh
 flutter analyze
 flutter test
+```
+
+For hosts with limited test-process capacity, run `flutter test --concurrency=1`.
+Archive integration tests use the bundled runtime for the current platform;
+macOS symbolic-link tests and filenames forbidden by Windows remain platform
+specific. The real Windows runner channels can also be checked without showing
+a window or launching external apps:
+
+```powershell
+flutter run -d windows -t tool/windows_platform_smoke.dart --no-pub
 ```
 
 7-Zip's redistributed license files are copied to

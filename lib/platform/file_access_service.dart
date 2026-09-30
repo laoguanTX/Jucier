@@ -34,8 +34,10 @@ abstract interface class FileAccessService {
   void setOpenSettingsHandler(VoidCallback? handler);
 }
 
-class MacOSFileAccessService implements FileAccessService {
-  MacOSFileAccessService({MethodChannel? channel})
+typedef MacOSFileAccessService = DesktopFileAccessService;
+
+class DesktopFileAccessService implements FileAccessService {
+  DesktopFileAccessService({MethodChannel? channel})
     : _channel = channel ?? const MethodChannel(_channelName);
 
   static const _channelName = 'dev.jucier/platform';

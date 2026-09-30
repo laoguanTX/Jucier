@@ -9,6 +9,7 @@ import 'archive_engine.dart';
 import 'archive_entry.dart';
 import 'archive_options.dart';
 import 'archive_path.dart';
+import '../platform/seven_zip_runtime.dart';
 
 class SevenZipEngine implements ArchiveEngine, ArchiveOperationEvents {
   SevenZipEngine({String? executablePath}) : _configuredPath = executablePath;
@@ -127,6 +128,10 @@ class SevenZipEngine implements ArchiveEngine, ArchiveOperationEvents {
     'permission denied',
     'operation not permitted',
     'errno=13',
+    'access is denied',
+    'sharing violation',
+    '拒绝访问',
+    '进程无法访问',
   ];
 
   static final _progressPattern = RegExp(r'(?<!\d)(\d{1,3})%');
@@ -753,7 +758,9 @@ class SevenZipEngine implements ArchiveEngine, ArchiveOperationEvents {
   }
 
   bool _claimPath(Set<String> claimedPaths, String path) {
-    final key = Platform.isMacOS ? path.toLowerCase() : path;
+    final key = Platform.isMacOS || Platform.isWindows
+        ? path.toLowerCase()
+        : path;
     return claimedPaths.add(key);
   }
 
@@ -1176,6 +1183,46 @@ class SevenZipEngine implements ArchiveEngine, ArchiveOperationEvents {
     String? workingDirectory,
     String? executableOverride,
   }) async {
+    // CreateProcess has a 32767 UTF-16 character limit. Large source sets
+    // must be passed as a UTF-8 list file, including the create command.
+    final sourceStart = arguments.indexOf('--');
+    final commandLength = arguments.fold(
+      0,
+      (sum, item) => sum + item.length + 4,
+    );
+    if (Platform.isWindows &&
+        executableOverride == null &&
+        sourceStart >= 0 &&
+        commandLength >= 24000) {
+      final directory = await Directory.systemTemp.createTemp(
+        'jucier-sources-',
+      );
+      try {
+        final list = File(p.join(directory.path, 'sources.txt'));
+        await list.writeAsString(arguments.skip(sourceStart + 1).join('\n'));
+        return await _runProcess(
+          [...arguments.take(sourceStart), '-scsUTF-8', '@${list.path}'],
+          onProgress: onProgress,
+          workingDirectory: workingDirectory,
+        );
+      } finally {
+        await directory.delete(recursive: true);
+      }
+    }
+    return _runProcess(
+      arguments,
+      onProgress: onProgress,
+      workingDirectory: workingDirectory,
+      executableOverride: executableOverride,
+    );
+  }
+
+  Future<String> _runProcess(
+    List<String> arguments, {
+    ProgressCallback? onProgress,
+    String? workingDirectory,
+    String? executableOverride,
+  }) async {
     _checkCancelled();
     if (_activeProcess != null) throw const ArchiveException('已有操作正在进行');
     final executable = executableOverride ?? await _resolveExecutable();
@@ -1281,52 +1328,15 @@ class SevenZipEngine implements ArchiveEngine, ArchiveOperationEvents {
 
   Future<String> _resolveExecutable() async {
     if (_executableCache case final cached?) return cached;
-    final candidates = <String?>[
-      _configuredPath,
-      Platform.environment['JUCIER_7ZZ_PATH'],
-      if (Platform.isMacOS)
-        p.normalize(
-          p.join(
-            p.dirname(Platform.resolvedExecutable),
-            '..',
-            'Resources',
-            'bin',
-            '7zz',
-          ),
-        ),
-      if (Platform.isMacOS)
-        p.normalize(
-          p.join(
-            p.dirname(Platform.resolvedExecutable),
-            '..',
-            'Frameworks',
-            'App.framework',
-            'Resources',
-            'flutter_assets',
-            'assets',
-            'sevenzip',
-            '7zz',
-          ),
-        ),
-      p.join(Directory.current.path, 'assets', 'sevenzip', '7zz'),
-    ];
-
-    for (final candidate in candidates) {
-      if (candidate != null &&
-          candidate.isNotEmpty &&
-          await File(candidate).exists()) {
-        return _executableCache = candidate;
-      }
-    }
-
-    final pathProbe = await Process.run('which', const [
-      '7zz',
-    ], runInShell: false);
-    if (pathProbe.exitCode == 0) {
-      final path = (pathProbe.stdout as String).trim();
-      if (path.isNotEmpty) return _executableCache = path;
-    }
-    throw const ArchiveException('找不到 7-Zip 引擎。请先运行 tool/build_7zip_macos.sh');
+    final executable = await findSevenZipExecutable(
+      configuredPath: _configuredPath,
+    );
+    if (executable != null) return _executableCache = executable;
+    throw ArchiveException(
+      Platform.isWindows
+          ? '找不到 7-Zip 引擎。请先运行 tool/prepare_7zip_windows.ps1'
+          : '找不到 7-Zip 引擎。请先运行 tool/build_7zip_macos.sh',
+    );
   }
 
   static ArchiveListing parseTechnicalListing(
@@ -1363,7 +1373,7 @@ class SevenZipEngine implements ArchiveEngine, ArchiveOperationEvents {
       final attributes = record['Attributes'] ?? '';
       entries.add(
         ArchiveEntry(
-          path: path,
+          path: path.replaceAll('\\', '/'),
           isDirectory: attributes.startsWith('D') || record['Folder'] == '+',
           size: int.tryParse(record['Size'] ?? ''),
           packedSize: int.tryParse(record['Packed Size'] ?? ''),

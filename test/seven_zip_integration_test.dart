@@ -8,12 +8,13 @@ import 'package:jucier/archive/seven_zip_engine.dart';
 import 'package:path/path.dart' as p;
 
 void main() {
-  final executable = p.join(
+  final executable = p.joinAll([
     Directory.current.path,
     'assets',
     'sevenzip',
-    '7zz',
-  );
+    if (Platform.isWindows) 'windows',
+    Platform.isWindows ? '7z.exe' : '7zz',
+  ]);
   final skip = !File(executable).existsSync();
 
   test(
@@ -307,7 +308,10 @@ void main() {
     final addedFolder = Directory(p.join(temporary.path, 'DroppedFolder'));
     await addedFolder.create();
     await File(p.join(addedFolder.path, 'child.txt')).writeAsString('child');
-    await Link(p.join(addedFolder.path, 'child-link.txt')).create('child.txt');
+    if (Platform.isMacOS) {
+      await Link(p.join(addedFolder.path, 'child-link.txt'))
+          .create('child.txt');
+    }
 
     await engine.addEntries(
       AddEntriesOptions(
@@ -322,18 +326,20 @@ void main() {
       containsAll([
         'Current/Inner/added.txt',
         'Current/Inner/DroppedFolder/child.txt',
-        'Current/Inner/DroppedFolder/child-link.txt',
+        if (Platform.isMacOS) 'Current/Inner/DroppedFolder/child-link.txt',
       ]),
     );
-    expect(
-      listing.entries
-          .singleWhere(
-            (entry) =>
-                entry.path == 'Current/Inner/DroppedFolder/child-link.txt',
-          )
-          .attributes,
-      contains('l'),
-    );
+    if (Platform.isMacOS) {
+      expect(
+        listing.entries
+            .singleWhere(
+              (entry) =>
+                  entry.path == 'Current/Inner/DroppedFolder/child-link.txt',
+            )
+            .attributes,
+        contains('l'),
+      );
+    }
 
     final output = p.join(temporary.path, 'output');
     await engine.extract(
@@ -357,11 +363,61 @@ void main() {
       'DroppedFolder',
       'child-link.txt',
     );
-    expect(
-      await FileSystemEntity.type(extractedLink, followLinks: false),
-      FileSystemEntityType.link,
-    );
+    if (Platform.isMacOS) {
+      expect(
+        await FileSystemEntity.type(extractedLink, followLinks: false),
+        FileSystemEntityType.link,
+      );
+    }
   }, skip: skip ? 'Build assets/sevenzip/7zz first.' : false);
+
+  test(
+    'case-insensitive staging keeps both dropped files with colliding names',
+    () async {
+      final temporary = await Directory.systemTemp.createTemp(
+        'jucier-case-e2e-',
+      );
+      addTearDown(() => temporary.delete(recursive: true));
+      final original = File(p.join(temporary.path, 'original.txt'));
+      await original.writeAsString('original');
+      final first = File(p.join(temporary.path, 'First', 'Report.txt'));
+      final second = File(p.join(temporary.path, 'Second', 'report.txt'));
+      await first.parent.create(recursive: true);
+      await second.parent.create(recursive: true);
+      await first.writeAsString('first');
+      await second.writeAsString('second');
+      final archive = p.join(temporary.path, 'collision.7z');
+      final engine = SevenZipEngine(executablePath: executable);
+      await engine.create(
+        CreateArchiveOptions(
+          archivePath: archive,
+          sources: [original.path],
+          format: ArchiveFormat.sevenZip,
+        ),
+      );
+      await engine.addEntries(
+        AddEntriesOptions(
+          archivePath: archive,
+          sources: [first.path, second.path],
+          destinationDirectory: 'Documents',
+        ),
+      );
+      final output = p.join(temporary.path, 'output');
+      await engine.extract(
+        ExtractArchiveOptions(archivePath: archive, outputDirectory: output),
+      );
+      expect(
+        await File(p.join(output, 'Documents', 'Report.txt')).readAsString(),
+        'first',
+      );
+      expect(
+        await File(p.join(output, 'Documents', 'report (1).txt'))
+            .readAsString(),
+        'second',
+      );
+    },
+    skip: skip || !(Platform.isWindows || Platform.isMacOS),
+  );
 
   test('recompacts 7z archives after repeated additions', () async {
     final temporary = await Directory.systemTemp.createTemp(

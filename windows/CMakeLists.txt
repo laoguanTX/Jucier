@@ -6,6 +6,12 @@ project(jucier LANGUAGES CXX)
 # the on-disk name of your application.
 set(BINARY_NAME "jucier")
 
+# A release must carry the full engine and codecs, independent of user PATH.
+if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../assets/sevenzip/windows/7z.exe"
+   OR NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../assets/sevenzip/windows/7z.dll")
+  message(FATAL_ERROR "Prepare the Windows 7-Zip runtime first: pwsh -File tool/prepare_7zip_windows.ps1")
+endif()
+
 # Explicitly opt in to modern CMake behaviors to avoid warnings with recent
 # versions of CMake.
 cmake_policy(VERSION 3.14...3.25)

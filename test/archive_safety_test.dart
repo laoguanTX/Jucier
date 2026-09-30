@@ -8,12 +8,13 @@ import 'package:jucier/archive/seven_zip_engine.dart';
 import 'package:path/path.dart' as p;
 
 void main() {
-  final executable = p.join(
+  final executable = p.joinAll([
     Directory.current.path,
     'assets',
     'sevenzip',
-    '7zz',
-  );
+    if (Platform.isWindows) 'windows',
+    Platform.isWindows ? '7z.exe' : '7zz',
+  ]);
   late Directory root;
   late SevenZipEngine engine;
   setUp(() async {
@@ -79,6 +80,9 @@ void main() {
         'ab.txt',
       ]);
     },
+    skip: Platform.isWindows
+        ? 'Windows cannot create filenames containing ?.'
+        : false,
   );
 
   test(
@@ -306,7 +310,12 @@ void main() {
     for (final name in names) {
       source.add(await file(name));
     }
-    final archive = await create(source);
+    late String archive;
+    try {
+      archive = await create(source);
+    } on ArchiveException catch (error) {
+      fail('${error.message}\n${error.output}');
+    }
     await engine.deleteEntries(
       archivePath: archive,
       entryPaths: names.take(159).toList(),

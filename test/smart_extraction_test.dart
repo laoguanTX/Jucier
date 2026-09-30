@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:jucier/archive/archive_entry.dart';
 import 'package:jucier/archive/smart_extraction.dart';
 import 'package:jucier/platform/smart_extraction_preference_store.dart';
+import 'package:path/path.dart' as p;
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -37,12 +38,12 @@ void main() {
             listing(['a.jpg', 'b.jpg'], name: name),
             '/out',
           ),
-          '/out/photos',
+          p.join('/out', 'photos'),
         );
       }
       expect(
         smartExtractionDirectory(listing(['folder/a', 'b']), '/out'),
-        '/out/photos',
+        p.join('/out', 'photos'),
       );
     },
   );

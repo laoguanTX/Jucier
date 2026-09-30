@@ -58,7 +58,7 @@ class ArchiveScreen extends StatefulWidget {
   final ArchiveEntriesCallback onExtractEntries;
   final ArchiveEntriesCallback onDeleteEntries;
   final ArchiveDropCallback onDropped;
-  final ArchiveDragCallback onDragEntries;
+  final ArchiveDragCallback? onDragEntries;
   final ArchiveScreenMode mode;
   final List<ArchiveColumn> columns;
   final ArchiveImportCallback? onImport;
@@ -409,7 +409,10 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
                               !widget.listing.canUpdate
                           ? null
                           : () => widget.onDeleteEntry(entry),
-                      onDragStarted: widget.enabled && !composing
+                      onDragStarted:
+                          widget.enabled &&
+                              !composing &&
+                              widget.onDragEntries != null
                           ? () => _startDraggingEntry(entry)
                           : null,
                     );
@@ -546,7 +549,8 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
   }
 
   Future<void> _startDraggingEntry(ArchiveEntry entry) async {
-    if (_draggingEntriesOut) return;
+    final drag = widget.onDragEntries;
+    if (_draggingEntriesOut || drag == null) return;
     final entries = _selectionMode && _selectedEntries.containsKey(entry.path)
         ? List<ArchiveEntry>.of(_selectedEntries.values)
         : [entry];
@@ -555,7 +559,7 @@ class _ArchiveScreenState extends State<ArchiveScreen> {
       _draggingIntoArchive = false;
     });
     try {
-      await widget.onDragEntries(entries);
+      await drag(entries);
     } finally {
       if (mounted) setState(() => _draggingEntriesOut = false);
     }

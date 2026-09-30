@@ -1,4 +1,5 @@
 import 'package:flutter/widgets.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:forui/forui.dart';
 import 'package:material_ui/material_ui.dart' show ThemeMode;
@@ -100,6 +101,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final status = _status;
     final granted = status?.granted ?? false;
     final colors = context.theme.colors;
+    final windows = defaultTargetPlatform == TargetPlatform.windows;
 
     return Padding(
       padding: const EdgeInsets.all(24),
@@ -172,58 +174,59 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ),
                       const SizedBox(height: 14),
                     ],
-                    _SettingsCard(
-                      key: const ValueKey('settings-finder-menu-card'),
-                      icon: FLucideIcons.mousePointerClick,
-                      title: 'Finder 右键菜单支持',
-                      description: _finderContextMenuAvailable == true
-                          ? 'Finder 扩展已安装，可在文件右键菜单中使用 Jucier。'
-                          : '安装 Finder 扩展，在文件右键菜单中显示 Jucier。',
-                      trailing: _finderContextMenuAvailable == true
-                          ? Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                FButton(
-                                  key: const ValueKey(
-                                    'settings-finder-menu-action',
+                    if (!windows)
+                      _SettingsCard(
+                        key: const ValueKey('settings-finder-menu-card'),
+                        icon: FLucideIcons.mousePointerClick,
+                        title: 'Finder 右键菜单支持',
+                        description: _finderContextMenuAvailable == true
+                            ? 'Finder 扩展已安装，可在文件右键菜单中使用 Jucier。'
+                            : '安装 Finder 扩展，在文件右键菜单中显示 Jucier。',
+                        trailing: _finderContextMenuAvailable == true
+                            ? Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  FButton(
+                                    key: const ValueKey(
+                                      'settings-finder-menu-action',
+                                    ),
+                                    size: FButtonSizeVariant.sm,
+                                    variant: FButtonVariant.outline,
+                                    onPress: null,
+                                    child: const Text('已安装'),
                                   ),
-                                  size: FButtonSizeVariant.sm,
-                                  variant: FButtonVariant.outline,
-                                  onPress: null,
-                                  child: const Text('已安装'),
+                                  const SizedBox(width: 6),
+                                  FButton(
+                                    key: const ValueKey(
+                                      'settings-finder-menu-uninstall',
+                                    ),
+                                    size: FButtonSizeVariant.sm,
+                                    variant: FButtonVariant.outline,
+                                    onPress: _uninstallingFinderContextMenu
+                                        ? null
+                                        : _uninstallFinderContextMenu,
+                                    child: Text(
+                                      _uninstallingFinderContextMenu
+                                          ? '正在卸载…'
+                                          : '卸载…',
+                                    ),
+                                  ),
+                                ],
+                              )
+                            : FButton(
+                                key: const ValueKey(
+                                  'settings-finder-menu-action',
                                 ),
-                                const SizedBox(width: 6),
-                                FButton(
-                                  key: const ValueKey(
-                                    'settings-finder-menu-uninstall',
-                                  ),
-                                  size: FButtonSizeVariant.sm,
-                                  variant: FButtonVariant.outline,
-                                  onPress: _uninstallingFinderContextMenu
-                                      ? null
-                                      : _uninstallFinderContextMenu,
-                                  child: Text(
-                                    _uninstallingFinderContextMenu
-                                        ? '正在卸载…'
-                                        : '卸载…',
-                                  ),
+                                size: FButtonSizeVariant.sm,
+                                variant: FButtonVariant.outline,
+                                onPress: _repairingFinderContextMenu
+                                    ? null
+                                    : _repairFinderContextMenu,
+                                child: Text(
+                                  _repairingFinderContextMenu ? '正在安装…' : '安装…',
                                 ),
-                              ],
-                            )
-                          : FButton(
-                              key: const ValueKey(
-                                'settings-finder-menu-action',
                               ),
-                              size: FButtonSizeVariant.sm,
-                              variant: FButtonVariant.outline,
-                              onPress: _repairingFinderContextMenu
-                                  ? null
-                                  : _repairFinderContextMenu,
-                              child: Text(
-                                _repairingFinderContextMenu ? '正在安装…' : '安装…',
-                              ),
-                            ),
-                    ),
+                      ),
                     const SizedBox(height: 14),
                     _SettingsCard(
                       key: const ValueKey('settings-archive-columns-card'),
@@ -315,24 +318,28 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       icon: FLucideIcons.folderOpen,
                       iconKey: const ValueKey('settings-permission-icon'),
                       title: '文件与文件夹访问',
-                      description: granted
+                      description: windows
+                          ? '使用当前 Windows 用户的文件访问权限。'
+                          : granted
                           ? '已授权：${status?.directory ?? '已选择的文件夹'}'
                           : '选择 Jucier 可以打开、创建和解压文件的位置。',
-                      trailing: FButton(
-                        key: const ValueKey('settings-permission-action'),
-                        size: FButtonSizeVariant.sm,
-                        variant: granted
-                            ? FButtonVariant.outline
-                            : FButtonVariant.primary,
-                        onPress: _requesting ? null : _requestAccess,
-                        child: Text(
-                          _requesting
-                              ? '等待授权…'
-                              : granted
-                              ? '更改…'
-                              : '授权…',
-                        ),
-                      ),
+                      trailing: windows
+                          ? const Text('由系统管理')
+                          : FButton(
+                              key: const ValueKey('settings-permission-action'),
+                              size: FButtonSizeVariant.sm,
+                              variant: granted
+                                  ? FButtonVariant.outline
+                                  : FButtonVariant.primary,
+                              onPress: _requesting ? null : _requestAccess,
+                              child: Text(
+                                _requesting
+                                    ? '等待授权…'
+                                    : granted
+                                    ? '更改…'
+                                    : '授权…',
+                              ),
+                            ),
                     ),
                   ],
                 ),

@@ -111,7 +111,7 @@ class _JucierShellState extends State<JucierShell> {
     _checkingForExternalArchive = widget.waitForInitialArchiveOpen;
     _workflow = ArchiveWorkflowController(widget.engine);
     _previews = FilePreviewService(
-      launcher: widget.fileLauncher ?? MacOSFileLauncher(),
+      launcher: widget.fileLauncher ?? DesktopFileLauncher(),
       onChanged: _handlePreviewChanged,
     );
     _archiveDragService = MacOSArchiveDragService(
@@ -142,9 +142,12 @@ class _JucierShellState extends State<JucierShell> {
   Widget build(BuildContext context) => ListenableBuilder(
     listenable: _workflow,
     builder: (context, _) => Shortcuts(
-      shortcuts: const <ShortcutActivator, Intent>{
-        SingleActivator(LogicalKeyboardKey.comma, meta: true):
-            _OpenSettingsIntent(),
+      shortcuts: <ShortcutActivator, Intent>{
+        const SingleActivator(LogicalKeyboardKey.comma, meta: true):
+            const _OpenSettingsIntent(),
+        if (!_isMacOS)
+          const SingleActivator(LogicalKeyboardKey.comma, control: true):
+              const _OpenSettingsIntent(),
       },
       child: Actions(
         actions: <Type, Action<Intent>>{
@@ -255,7 +258,7 @@ class _JucierShellState extends State<JucierShell> {
       onOptimize: _optimizeCurrentArchive,
       onManagePreviews: _previews.sessions.isEmpty ? null : _managePreviews,
       onDropped: _addDroppedEntries,
-      onDragEntries: _dragEntries,
+      onDragEntries: _isMacOS ? _dragEntries : null,
     );
   }
 

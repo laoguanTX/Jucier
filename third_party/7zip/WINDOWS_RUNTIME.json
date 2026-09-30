@@ -1,0 +1,7 @@
+{
+  "release": "26.02",
+  "installer": "7z2602-x64.exe",
+  "installerSha256": "6745fa76dc2ea031596d8678f6f6b99c3c1b435b4164a63485adbbc7b8d82ef0",
+  "bootstrapRelease": "26.03",
+  "bootstrapSha256": "ad4c82fadcbdf93c03b4fc440f300509c7d60c5c2f4d183e35d9d70d6957037d"
+}

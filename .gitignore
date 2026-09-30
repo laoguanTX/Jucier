@@ -33,6 +33,8 @@ migrate_working_dir/
 /build/
 /coverage/
 /assets/sevenzip/7zz
+/assets/sevenzip/windows/*.exe
+/assets/sevenzip/windows/*.dll
 /assets/sevenzip/licenses/*.txt
 /third_party/7zip/downloads/
 /third_party/7zip/source/

@@ -12,9 +12,11 @@ abstract interface class ArchiveOpenService {
   Future<void> quitApplication();
 }
 
-/// Delivers Finder/Open With events from the macOS runner to the app shell.
-class MacOSArchiveOpenService implements ArchiveOpenService {
-  MacOSArchiveOpenService({MethodChannel? channel})
+typedef MacOSArchiveOpenService = DesktopArchiveOpenService;
+
+/// Delivers Finder/Open With events and Windows launch arguments to the shell.
+class DesktopArchiveOpenService implements ArchiveOpenService {
+  DesktopArchiveOpenService({MethodChannel? channel})
     : _channel = channel ?? const MethodChannel(_channelName);
 
   static const _channelName = 'dev.jucier/archive_open';
@@ -41,7 +43,7 @@ class MacOSArchiveOpenService implements ArchiveOpenService {
     try {
       await _channel.invokeMethod<void>('quitApplication');
     } on MissingPluginException {
-      // Only the macOS runner can terminate the desktop application.
+      // Runners without this channel cannot terminate the application.
     } on PlatformException {
       // Closing an externally opened archive should not crash the UI.
     }
@@ -72,7 +74,7 @@ class MacOSArchiveOpenService implements ArchiveOpenService {
         }
       }
     } on MissingPluginException {
-      // Finder open events are only available in the macOS runner.
+      // Open events are unavailable in runners without this channel.
     } on PlatformException {
       // A later native event will retry the pending-file drain.
     } finally {

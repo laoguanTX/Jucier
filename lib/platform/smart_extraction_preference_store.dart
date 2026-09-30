@@ -1,7 +1,10 @@
 import 'package:flutter/services.dart';
 
-class MacOSSmartExtractionPreferenceStore {
-  MacOSSmartExtractionPreferenceStore({MethodChannel? channel})
+typedef MacOSSmartExtractionPreferenceStore =
+    DesktopSmartExtractionPreferenceStore;
+
+class DesktopSmartExtractionPreferenceStore {
+  DesktopSmartExtractionPreferenceStore({MethodChannel? channel})
     : _channel = channel ?? const MethodChannel('dev.jucier/platform');
 
   final MethodChannel _channel;

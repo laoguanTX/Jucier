@@ -8,9 +8,11 @@ abstract interface class ArchiveColumnPreferenceStore {
   Future<void> save(ArchiveColumnPreferences preferences);
 }
 
-class MacOSArchiveColumnPreferenceStore
+typedef MacOSArchiveColumnPreferenceStore = DesktopArchiveColumnPreferenceStore;
+
+class DesktopArchiveColumnPreferenceStore
     implements ArchiveColumnPreferenceStore {
-  MacOSArchiveColumnPreferenceStore({MethodChannel? channel})
+  DesktopArchiveColumnPreferenceStore({MethodChannel? channel})
     : _channel = channel ?? const MethodChannel(_channelName);
 
   static const _channelName = 'dev.jucier/platform';

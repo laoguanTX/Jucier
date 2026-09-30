@@ -7,9 +7,11 @@ abstract interface class ThemePreferenceStore {
   Future<void> save(ThemeMode mode);
 }
 
-/// Persists the selected appearance through the native macOS preferences.
-class MacOSThemePreferenceStore implements ThemePreferenceStore {
-  MacOSThemePreferenceStore({MethodChannel? channel})
+typedef MacOSThemePreferenceStore = DesktopThemePreferenceStore;
+
+/// Persists appearance through macOS UserDefaults or the Windows user registry.
+class DesktopThemePreferenceStore implements ThemePreferenceStore {
+  DesktopThemePreferenceStore({MethodChannel? channel})
     : _channel = channel ?? const MethodChannel(_channelName);
 
   static const _channelName = 'dev.jucier/platform';

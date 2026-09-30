@@ -8,9 +8,12 @@ abstract interface class SingleEntryExtractionPreferenceStore {
   Future<void> save(SingleEntryExtractionMode mode);
 }
 
-class MacOSSingleEntryExtractionPreferenceStore
+typedef MacOSSingleEntryExtractionPreferenceStore =
+    DesktopSingleEntryExtractionPreferenceStore;
+
+class DesktopSingleEntryExtractionPreferenceStore
     implements SingleEntryExtractionPreferenceStore {
-  MacOSSingleEntryExtractionPreferenceStore({MethodChannel? channel})
+  DesktopSingleEntryExtractionPreferenceStore({MethodChannel? channel})
     : _channel = channel ?? const MethodChannel(_channelName);
 
   static const _channelName = 'dev.jucier/platform';

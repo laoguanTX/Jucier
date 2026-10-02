@@ -5,6 +5,7 @@ import 'package:path/path.dart' as p;
 import 'dart:io';
 
 import 'package:flutter/widgets.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jucier/app.dart';
 import 'package:jucier/archive/archive_engine.dart';
@@ -13,8 +14,14 @@ import 'package:jucier/archive/archive_options.dart';
 import 'package:jucier/platform/file_access_service.dart';
 import 'package:jucier/platform/finder_action_service.dart';
 import 'package:jucier/platform/archive_open_service.dart';
+import 'package:jucier/platform/archive_open_preference_store.dart';
 
 void main() {
+  const channel = MethodChannel('dev.jucier/platform');
+  final messenger =
+      TestWidgetsFlutterBinding.ensureInitialized().defaultBinaryMessenger;
+  setUp(() => messenger.setMockMethodCallHandler(channel, (_) async => null));
+  tearDown(() => messenger.setMockMethodCallHandler(channel, null));
   test('decodes a native Finder action request', () {
     final request = FinderActionRequest.fromPlatform({
       'action': 'compress',
@@ -99,6 +106,38 @@ void main() {
     await tester.pumpAndSettle();
     expect(openService.quitCalls, 1);
   });
+
+  testWidgets(
+    'explicit extract-to opens the archive even in direct extraction mode',
+    (tester) async {
+      messenger.setMockMethodCallHandler(
+        channel,
+        (call) async => call.method == 'archiveOpenMode'
+            ? ArchiveOpenMode.extract.name
+            : null,
+      );
+      final engine = _FinderActionArchiveEngine();
+      final service = _FakeFinderActionService(
+        const FinderActionRequest(
+          type: FinderActionType.extractTo,
+          paths: ['/tmp/example.zip'],
+        ),
+      );
+      await tester.pumpWidget(
+        JucierApp(
+          engine: engine,
+          fileAccessService: _GrantedFileAccessService(),
+          finderActionService: service,
+        ),
+      );
+      await tester.pumpAndSettle();
+      await service.dispatch();
+      await tester.pumpAndSettle();
+      expect(engine.extractions, isEmpty);
+      expect(engine.listCalls, ['/tmp/example.zip']);
+      expect(find.byKey(const ValueKey('archive-page')), findsOneWidget);
+    },
+  );
 
   testWidgets('Finder 压缩成 ZIP creates beside the selected source', (
     tester,

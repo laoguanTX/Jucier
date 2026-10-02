@@ -151,13 +151,21 @@ PlatformServices::PlatformServices(flutter::BinaryMessenger* messenger,
       result->Success(Value(Map{{Value("available"), Value(false)}}));
     } else if (method == "themeMode" || method == "singleEntryExtractionMode" ||
                method == "smartExtractionEnabled" || method == "archiveColumnPreferences" ||
-               method == "compressionPerformance") {
+               method == "compressionPerformance" || method == "archiveOpenMode") {
       const auto stored = ReadPreference(method);
       if (stored) result->Success(*stored);
       else result->Success();
     } else {
       std::string key;
-      if (method == "setCompressionPerformance") {
+      if (method == "setArchiveOpenMode") {
+        const auto* value = call.arguments()
+            ? std::get_if<std::string>(call.arguments()) : nullptr;
+        if (!value || (*value != "open" && *value != "extract")) {
+          result->Error("invalid_preference", "无效的双击压缩包设置");
+          return;
+        }
+        key = "archiveOpenMode";
+      } else if (method == "setCompressionPerformance") {
         const auto* value = call.arguments()
             ? std::get_if<std::string>(call.arguments()) : nullptr;
         if (!value || (*value != "balanced" && *value != "speed" &&

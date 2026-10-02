@@ -33,6 +33,9 @@ visible in a compact footer.
 - Test archive integrity, show progress, and cancel the active operation.
 - Drag and drop into the app plus native desktop open/save panels.
 - Native default-app previews and persistent settings on macOS and Windows.
+- Choose whether double-clicking an archive opens its file list (the default)
+  or extracts beside the archive, respecting Smart extraction. Both desktop
+  platforms persist the choice and prompt for passwords when needed.
 - System, light, and dark desktop themes with a persistent appearance setting.
 
 ## Requirements
@@ -74,7 +77,8 @@ as a development override on both platforms.
 Windows uses the current user's filesystem permissions and stores preferences
 under `HKEY_CURRENT_USER\Software\Jucier\Preferences`. Ctrl+, opens settings.
 Opening an archive with Jucier through Windows **Open with**, or passing its
-path on the command line, opens the archive directly. Default file associations
+path on the command line, follows the double-click behavior selected in Settings.
+Default file associations
 are chosen in Windows system settings; Jucier does not overwrite UserChoice.
 Windows has a title bar that shares the app background, with native dragging,
 resizing, maximize/restore and Windows 11 Snap Layout hit testing. In Settings,

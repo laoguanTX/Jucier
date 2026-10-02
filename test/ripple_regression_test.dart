@@ -60,7 +60,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(SettingsScreen), findsNothing);
     expect(associations.statusCalls, 1);
-  });
+  }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
 
   for (final dark in [false, true]) {
     testWidgets(

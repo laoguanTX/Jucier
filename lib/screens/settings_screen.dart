@@ -11,6 +11,7 @@ import '../dialogs/archive_columns_dialog.dart';
 import '../dialogs/archive_file_association_dialog.dart';
 import '../dialogs/message_dialog.dart';
 import '../platform/archive_file_association_service.dart';
+import '../platform/archive_open_preference_store.dart';
 import '../platform/file_access_service.dart';
 import '../platform/finder_action_service.dart';
 import '../platform/single_entry_extraction_preference_store.dart';
@@ -23,6 +24,8 @@ class SettingsScreen extends StatefulWidget {
     required this.themeMode,
     required this.onBack,
     this.onThemeModeChanged,
+    this.archiveOpenMode = ArchiveOpenMode.open,
+    this.onArchiveOpenModeChanged,
     this.compressionPerformance = CompressionPerformance.balanced,
     this.onCompressionPerformanceChanged,
     this.singleEntryExtractionMode =
@@ -40,6 +43,8 @@ class SettingsScreen extends StatefulWidget {
   final FinderActionService finderActionService;
   final ThemeMode themeMode;
   final ValueChanged<ThemeMode>? onThemeModeChanged;
+  final ArchiveOpenMode archiveOpenMode;
+  final ValueChanged<ArchiveOpenMode>? onArchiveOpenModeChanged;
   final CompressionPerformance compressionPerformance;
   final ValueChanged<CompressionPerformance>? onCompressionPerformanceChanged;
   final bool smartExtractionEnabled;
@@ -300,6 +305,30 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           ),
                           items: {
                             for (final mode in CompressionPerformance.values)
+                              mode.label: mode,
+                          },
+                        ),
+                      ),
+                    ),
+                    _SettingsCard(
+                      key: const ValueKey('settings-archive-open-card'),
+                      icon: FLucideIcons.mousePointer2,
+                      title: '双击压缩包',
+                      description: widget.archiveOpenMode.description,
+                      trailing: SizedBox(
+                        width: 244,
+                        child: FSelect<ArchiveOpenMode>(
+                          key: const ValueKey('archive-open-mode-select'),
+                          control: FSelectControl.lifted(
+                            value: widget.archiveOpenMode,
+                            onChange: (mode) {
+                              if (mode != null) {
+                                widget.onArchiveOpenModeChanged?.call(mode);
+                              }
+                            },
+                          ),
+                          items: {
+                            for (final mode in ArchiveOpenMode.values)
                               mode.label: mode,
                           },
                         ),

@@ -10,6 +10,7 @@ import 'package:jucier/archive/archive_engine.dart';
 import 'package:jucier/archive/archive_formats.dart';
 import 'package:jucier/archive/archive_options.dart';
 import 'package:jucier/platform/compression_preference_store.dart';
+import 'package:jucier/platform/archive_open_preference_store.dart';
 import 'package:jucier/platform/archive_file_association_service.dart';
 import 'package:jucier/platform/archive_column_preference_store.dart';
 import 'package:jucier/platform/file_access_service.dart';
@@ -41,7 +42,7 @@ void main() {
         final select = find.byKey(
           const ValueKey('compression-performance-select'),
         );
-        await tester.ensureVisible(select);
+        await Scrollable.ensureVisible(tester.element(select), alignment: 0.5);
         await tester.pumpAndSettle();
         expect(
           find.text(CompressionPerformance.resourceSaving.description),
@@ -80,6 +81,54 @@ void main() {
               .compressionPerformance,
           CompressionPerformance.speed,
         );
+        expect(tester.takeException(), isNull);
+      },
+      platform: platform,
+    );
+    testDesktop(
+      'double-click preference switches and persists on ${platform.name}',
+      (tester) async {
+        final store = _FakeArchiveOpenPreferenceStore();
+        final permissions = _FakeFileAccessService(
+          initialStatus: const FileAccessStatus(requested: true, granted: true),
+        );
+        Widget app() => JucierApp(
+          engine: _UnusedArchiveEngine(),
+          fileAccessService: permissions,
+          archiveOpenPreferenceStore: store,
+        );
+        await tester.pumpWidget(app());
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('设置'));
+        await tester.pumpAndSettle();
+        final select = find.byKey(const ValueKey('archive-open-mode-select'));
+        await Scrollable.ensureVisible(tester.element(select), alignment: 0.5);
+        await tester.pumpAndSettle();
+        expect(find.text('双击打开'), findsOneWidget);
+        await tester.tap(select);
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('双击直接解压'));
+        await tester.pumpAndSettle();
+        expect(store.saved, [ArchiveOpenMode.extract]);
+        expect(find.text(ArchiveOpenMode.extract.description), findsOneWidget);
+
+        await tester.pumpWidget(const SizedBox());
+        await tester.pumpAndSettle();
+        await tester.pumpWidget(app());
+        await tester.pumpAndSettle();
+        expect(
+          tester.widget<JucierShell>(find.byType(JucierShell)).archiveOpenMode,
+          ArchiveOpenMode.extract,
+        );
+        await tester.tap(find.text('设置'));
+        await tester.pumpAndSettle();
+        await Scrollable.ensureVisible(tester.element(select), alignment: 0.5);
+        await tester.pumpAndSettle();
+        await tester.tap(select);
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('双击打开'));
+        await tester.pumpAndSettle();
+        expect(store.saved, [ArchiveOpenMode.extract, ArchiveOpenMode.open]);
         expect(tester.takeException(), isNull);
       },
       platform: platform,
@@ -674,6 +723,20 @@ class _FakeFinderMenuService implements FinderActionService {
     uninstallCalls++;
     await uninstallation?.future;
     installed = false;
+  }
+}
+
+class _FakeArchiveOpenPreferenceStore implements ArchiveOpenPreferenceStore {
+  ArchiveOpenMode mode = ArchiveOpenMode.open;
+  final saved = <ArchiveOpenMode>[];
+
+  @override
+  Future<ArchiveOpenMode> load() async => mode;
+
+  @override
+  Future<void> save(ArchiveOpenMode mode) async {
+    this.mode = mode;
+    saved.add(mode);
   }
 }
 

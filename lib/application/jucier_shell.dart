@@ -25,6 +25,7 @@ import '../platform/finder_action_service.dart';
 import '../platform/archive_drag_service.dart';
 import '../platform/archive_file_association_service.dart';
 import '../platform/archive_open_service.dart';
+import '../platform/archive_open_preference_store.dart';
 import '../platform/file_preview_service.dart';
 import '../platform/single_entry_extraction_preference_store.dart';
 import '../screens/archive_screen.dart';
@@ -49,6 +50,9 @@ class JucierShell extends StatefulWidget {
     required this.archiveOpenService,
     required this.finderActionService,
     this.waitForInitialArchiveOpen = false,
+    this.resolveExternalOpenPreferences,
+    this.archiveOpenMode = ArchiveOpenMode.open,
+    this.onArchiveOpenModeChanged,
     this.themeMode = ThemeMode.system,
     this.onThemeModeChanged,
     this.compressionPerformance = CompressionPerformance.balanced,
@@ -70,6 +74,10 @@ class JucierShell extends StatefulWidget {
   final ArchiveOpenService archiveOpenService;
   final FinderActionService finderActionService;
   final bool waitForInitialArchiveOpen;
+  final Future<ArchiveOpenPreferences> Function()?
+  resolveExternalOpenPreferences;
+  final ArchiveOpenMode archiveOpenMode;
+  final ValueChanged<ArchiveOpenMode>? onArchiveOpenModeChanged;
   final ThemeMode themeMode;
   final ValueChanged<ThemeMode>? onThemeModeChanged;
   final CompressionPerformance compressionPerformance;
@@ -204,6 +212,8 @@ class _JucierShellState extends State<JucierShell> {
         fileAccessService: widget.fileAccessService,
         archiveFileAssociationService: widget.archiveFileAssociationService,
         finderActionService: widget.finderActionService,
+        archiveOpenMode: widget.archiveOpenMode,
+        onArchiveOpenModeChanged: widget.onArchiveOpenModeChanged,
         themeMode: widget.themeMode,
         onThemeModeChanged: widget.onThemeModeChanged,
         compressionPerformance: widget.compressionPerformance,
@@ -415,10 +425,21 @@ class _JucierShellState extends State<JucierShell> {
     }
   }
 
-  Future<void> _openExternalArchive(String path) async {
+  Future<void> _openExternalArchive(
+    String path, {
+    bool useDefaultAction = true,
+  }) async {
     if (!isSupportedArchivePath(path)) return;
+    final preferences = await _externalOpenPreferences();
+    if (!mounted) return;
     await _workflow.waitUntilIdle();
     if (!mounted) return;
+    if (useDefaultAction && preferences.mode == ArchiveOpenMode.extract) {
+      await _extractArchivesBesideSource([
+        path,
+      ], smartExtractionEnabled: preferences.smartExtractionEnabled);
+      return;
+    }
     setState(() {
       _openingExternalArchive = true;
       _externalArchiveSession = true;
@@ -437,16 +458,30 @@ class _JucierShellState extends State<JucierShell> {
     setState(() => _openingExternalArchive = false);
   }
 
+  Future<ArchiveOpenPreferences> _externalOpenPreferences() async =>
+      await widget.resolveExternalOpenPreferences?.call() ??
+      (
+        mode: widget.archiveOpenMode,
+        smartExtractionEnabled: widget.smartExtractionEnabled,
+      );
+
   Future<void> _handleFinderAction(FinderActionRequest request) async {
     await _workflow.waitUntilIdle();
     if (!mounted) return;
 
     switch (request.type) {
       case FinderActionType.extractHere:
-        await _extractFinderArchives(request.paths);
+        final preferences = await _externalOpenPreferences();
+        if (!mounted) return;
+        await _extractArchivesBesideSource(
+          request.paths,
+          smartExtractionEnabled: preferences.smartExtractionEnabled,
+        );
       case FinderActionType.extractTo:
         final archives = request.paths.where(isSupportedArchivePath).toList();
-        if (archives.length == 1) await _openExternalArchive(archives.single);
+        if (archives.length == 1) {
+          await _openExternalArchive(archives.single, useDefaultAction: false);
+        }
       case FinderActionType.compressZip:
         await _compressFinderSourcesToZip(request.paths);
       case FinderActionType.compress:
@@ -462,12 +497,15 @@ class _JucierShellState extends State<JucierShell> {
     if (_workflow.listing != null) _workflow.closeArchive();
   }
 
-  Future<void> _extractFinderArchives(List<String> paths) async {
+  Future<void> _extractArchivesBesideSource(
+    List<String> paths, {
+    required bool smartExtractionEnabled,
+  }) async {
     final archives = paths.where(isSupportedArchivePath).toList();
     _prepareForFinderWorkflow();
 
     if (archives.isEmpty) {
-      await _showFinderExtractionResult(
+      await _showExternalExtractionResult(
         title: '解压失败',
         message: '所选项目中没有支持的压缩包。',
       );
@@ -475,11 +513,14 @@ class _JucierShellState extends State<JucierShell> {
     }
 
     var completed = 0;
-    _FinderExtractionOutcome? stopped;
+    _ArchiveExtractionOutcome? stopped;
     String? completedDirectory;
     for (final archivePath in archives) {
       if (!mounted) return;
-      final outcome = await _extractFinderArchive(archivePath);
+      final outcome = await _extractArchiveBesideSource(
+        archivePath,
+        smartExtractionEnabled: smartExtractionEnabled,
+      );
       if (!outcome.succeeded) {
         stopped = outcome;
         break;
@@ -491,14 +532,14 @@ class _JucierShellState extends State<JucierShell> {
     if (!mounted) return;
     if (stopped != null) {
       final prefix = completed == 0 ? '' : '已成功解压 $completed 个压缩包。\n\n';
-      await _showFinderExtractionResult(
+      await _showExternalExtractionResult(
         title: '解压失败',
         message: '$prefix${p.basename(stopped.archivePath)}：${stopped.error}',
       );
       return;
     }
 
-    await _showFinderExtractionResult(
+    await _showExternalExtractionResult(
       title: '解压完成',
       message: completed == 1
           ? '文件已保存到 $completedDirectory'
@@ -506,7 +547,7 @@ class _JucierShellState extends State<JucierShell> {
     );
   }
 
-  Future<void> _showFinderExtractionResult({
+  Future<void> _showExternalExtractionResult({
     required String title,
     required String message,
   }) async {
@@ -515,12 +556,13 @@ class _JucierShellState extends State<JucierShell> {
     if (mounted) await widget.archiveOpenService.quitApplication();
   }
 
-  Future<_FinderExtractionOutcome> _extractFinderArchive(
+  Future<_ArchiveExtractionOutcome> _extractArchiveBesideSource(
     String archivePath, {
+    required bool smartExtractionEnabled,
     String? password,
   }) async {
     try {
-      final destination = widget.smartExtractionEnabled
+      final destination = smartExtractionEnabled
           ? smartExtractionDirectory(
               await widget.engine.list(archivePath, password: password),
               p.dirname(archivePath),
@@ -533,23 +575,27 @@ class _JucierShellState extends State<JucierShell> {
           password: password,
         ),
       );
-      return _FinderExtractionOutcome.succeeded(archivePath, destination);
+      return _ArchiveExtractionOutcome.succeeded(archivePath, destination);
     } on ArchivePasswordRequiredException {
       if (!mounted) {
-        return _FinderExtractionOutcome.failed(archivePath, '应用已关闭。');
+        return _ArchiveExtractionOutcome.failed(archivePath, '应用已关闭。');
       }
       final entered = await showPasswordDialog(
         context,
         title: '输入 ${p.basename(archivePath)} 的密码',
       );
       if (entered == null || !mounted) {
-        return _FinderExtractionOutcome.failed(archivePath, '操作已取消。');
+        return _ArchiveExtractionOutcome.failed(archivePath, '操作已取消。');
       }
-      return _extractFinderArchive(archivePath, password: entered);
+      return _extractArchiveBesideSource(
+        archivePath,
+        smartExtractionEnabled: smartExtractionEnabled,
+        password: entered,
+      );
     } on ArchiveCancelledException {
-      return _FinderExtractionOutcome.failed(archivePath, '操作已取消。');
+      return _ArchiveExtractionOutcome.failed(archivePath, '操作已取消。');
     } on ArchiveException catch (error) {
-      return _FinderExtractionOutcome.failed(archivePath, error.message);
+      return _ArchiveExtractionOutcome.failed(archivePath, error.message);
     }
   }
 
@@ -1237,22 +1283,24 @@ class _OpenSettingsIntent extends Intent {
   const _OpenSettingsIntent();
 }
 
-class _FinderExtractionOutcome {
-  const _FinderExtractionOutcome._({
+class _ArchiveExtractionOutcome {
+  const _ArchiveExtractionOutcome._({
     required this.archivePath,
     required this.succeeded,
     this.error,
     this.outputDirectory,
   });
 
-  const _FinderExtractionOutcome.succeeded(String archivePath, String directory)
-    : this._(
+  const _ArchiveExtractionOutcome.succeeded(
+    String archivePath,
+    String directory,
+  ) : this._(
         archivePath: archivePath,
         succeeded: true,
         outputDirectory: directory,
       );
 
-  const _FinderExtractionOutcome.failed(String archivePath, String error)
+  const _ArchiveExtractionOutcome.failed(String archivePath, String error)
     : this._(archivePath: archivePath, succeeded: false, error: error);
 
   final String archivePath;

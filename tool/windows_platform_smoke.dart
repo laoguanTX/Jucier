@@ -39,34 +39,42 @@ Future<void> main() async {
       'smartExtractionEnabled',
       'archiveColumnPreferences',
       'compressionPerformance',
+      'archiveOpenMode',
     ]) {
       await platform.invokeMethod<Object?>(method);
     }
-    final previousCompression = await platform.invokeMethod<String>(
-      'compressionPerformance',
-    );
-    try {
-      for (final mode in ['balanced', 'speed', 'resourceSaving']) {
-        await platform.invokeMethod<void>('setCompressionPerformance', mode);
-        if (await platform.invokeMethod<String>('compressionPerformance') !=
-            mode) {
-          throw StateError('Compression preference did not round trip: $mode');
-        }
-      }
+    for (final preference in [
+      (
+        getter: 'compressionPerformance',
+        setter: 'setCompressionPerformance',
+        modes: ['balanced', 'speed', 'resourceSaving'],
+      ),
+      (
+        getter: 'archiveOpenMode',
+        setter: 'setArchiveOpenMode',
+        modes: ['open', 'extract'],
+      ),
+    ]) {
+      final previous = await platform.invokeMethod<String>(preference.getter);
       try {
+        for (final mode in preference.modes) {
+          await platform.invokeMethod<void>(preference.setter, mode);
+          if (await platform.invokeMethod<String>(preference.getter) != mode) {
+            throw StateError('${preference.getter} did not round trip: $mode');
+          }
+        }
+        try {
+          await platform.invokeMethod<void>(preference.setter, 'invalid');
+          throw StateError('Invalid ${preference.getter} was accepted');
+        } on PlatformException catch (error) {
+          if (error.code != 'invalid_preference') rethrow;
+        }
+      } finally {
         await platform.invokeMethod<void>(
-          'setCompressionPerformance',
-          'invalid',
+          preference.setter,
+          previous ?? preference.modes.first,
         );
-        throw StateError('Invalid compression preference was accepted');
-      } on PlatformException catch (error) {
-        if (error.code != 'invalid_preference') rethrow;
       }
-    } finally {
-      await platform.invokeMethod<void>(
-        'setCompressionPerformance',
-        previousCompression ?? 'balanced',
-      );
     }
     final pending = await archiveOpen.invokeListMethod<String>(
       'takePendingOpenFiles',

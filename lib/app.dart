@@ -9,6 +9,7 @@ import 'archive/archive_options.dart';
 import 'archive/seven_zip_engine.dart';
 import 'platform/archive_file_association_service.dart';
 import 'platform/archive_open_service.dart';
+import 'platform/archive_open_preference_store.dart';
 import 'platform/file_access_service.dart';
 import 'platform/finder_action_service.dart';
 import 'widgets/windows_title_bar.dart';
@@ -50,6 +51,7 @@ class JucierApp extends StatefulWidget {
     this.archiveColumnPreferenceStore,
     this.archiveFileAssociationService,
     this.archiveOpenService,
+    this.archiveOpenPreferenceStore,
     this.finderActionService,
     this.waitForInitialArchiveOpen = false,
   });
@@ -63,6 +65,7 @@ class JucierApp extends StatefulWidget {
   final ArchiveColumnPreferenceStore? archiveColumnPreferenceStore;
   final ArchiveFileAssociationService? archiveFileAssociationService;
   final ArchiveOpenService? archiveOpenService;
+  final ArchiveOpenPreferenceStore? archiveOpenPreferenceStore;
   final FinderActionService? finderActionService;
   final bool waitForInitialArchiveOpen;
 
@@ -83,6 +86,10 @@ class _JucierAppState extends State<JucierApp> {
   late final ArchiveColumnPreferenceStore _archiveColumnPreferenceStore;
   late final ArchiveFileAssociationService _archiveFileAssociationService;
   late final ArchiveOpenService _archiveOpenService;
+  late final ArchiveOpenPreferenceStore _archiveOpenPreferenceStore;
+  late final Future<void> _externalOpenPreferencesReady;
+  ArchiveOpenMode _archiveOpenMode = ArchiveOpenMode.open;
+  bool _archiveOpenModeChangedByUser = false;
   late final FinderActionService _finderActionService;
   final _smartExtractionStore = DesktopSmartExtractionPreferenceStore();
   bool _smartExtractionEnabled = true;
@@ -117,13 +124,44 @@ class _JucierAppState extends State<JucierApp> {
         MacOSArchiveFileAssociationService();
     _archiveOpenService =
         widget.archiveOpenService ?? DesktopArchiveOpenService();
+    _archiveOpenPreferenceStore =
+        widget.archiveOpenPreferenceStore ??
+        DesktopArchiveOpenPreferenceStore();
     _finderActionService =
         widget.finderActionService ?? DesktopFinderActionService();
-    _loadSmartExtraction();
+    _externalOpenPreferencesReady = _loadExternalOpenPreferences();
     _loadCompressionPerformance();
     _loadThemeMode();
     _loadSingleEntryExtractionMode();
     _loadArchiveColumnPreferences();
+  }
+
+  Future<void> _loadExternalOpenPreferences() async {
+    await Future.wait([_loadArchiveOpenMode(), _loadSmartExtraction()]);
+  }
+
+  Future<ArchiveOpenPreferences> _resolveExternalOpenPreferences() async {
+    await _externalOpenPreferencesReady;
+    // Read state directly: a native open event can arrive before the next
+    // Flutter frame has passed these loaded values to the shell.
+    return (
+      mode: _archiveOpenMode,
+      smartExtractionEnabled: _smartExtractionEnabled,
+    );
+  }
+
+  Future<void> _loadArchiveOpenMode() async {
+    final mode = await _archiveOpenPreferenceStore.load();
+    if (mounted && !_archiveOpenModeChangedByUser) {
+      setState(() => _archiveOpenMode = mode);
+    }
+  }
+
+  void _setArchiveOpenMode(ArchiveOpenMode mode) {
+    if (_archiveOpenMode == mode) return;
+    _archiveOpenModeChangedByUser = true;
+    setState(() => _archiveOpenMode = mode);
+    _archiveOpenPreferenceStore.save(mode);
   }
 
   Future<void> _loadSmartExtraction() async {
@@ -240,6 +278,9 @@ class _JucierAppState extends State<JucierApp> {
         fileAccessService: _fileAccessService,
         archiveFileAssociationService: _archiveFileAssociationService,
         archiveOpenService: _archiveOpenService,
+        resolveExternalOpenPreferences: _resolveExternalOpenPreferences,
+        archiveOpenMode: _archiveOpenMode,
+        onArchiveOpenModeChanged: _setArchiveOpenMode,
         finderActionService: _finderActionService,
         waitForInitialArchiveOpen: widget.waitForInitialArchiveOpen,
         themeMode: _themeMode,

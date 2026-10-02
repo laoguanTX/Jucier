@@ -4,6 +4,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:path/path.dart' as p;
 
 import '../archive/archive_options.dart';
+import '../widgets/dialog_form.dart';
 
 enum SourcePickerChoice { files, folder }
 
@@ -89,7 +90,6 @@ class _CreateArchiveForm extends StatefulWidget {
 
 class _CreateArchiveFormState extends State<_CreateArchiveForm> {
   static const double _formatWidth = 150;
-  static const double _controlHeight = 48;
   static const double _sectionRowHeight = 72;
 
   late final TextEditingController _pathController;
@@ -125,11 +125,6 @@ class _CreateArchiveFormState extends State<_CreateArchiveForm> {
 
   @override
   Widget build(BuildContext context) {
-    final smallTitleStyle = context.theme.typography.body.sm.copyWith(
-      color: context.theme.colors.foreground,
-      fontWeight: FontWeight.w500,
-      decoration: TextDecoration.none,
-    );
     final largeTitleStyle = context.theme.typography.display.xl.copyWith(
       color: context.theme.colors.foreground,
       fontWeight: FontWeight.w600,
@@ -157,38 +152,13 @@ class _CreateArchiveFormState extends State<_CreateArchiveForm> {
             style: widget.style.bodyTextStyle,
           ),
           const SizedBox(height: 12),
-          Text(
-            '保存位置',
-            key: const ValueKey('save-location-title'),
-            style: smallTitleStyle,
-          ),
+          const DialogFormLabel('保存位置', key: ValueKey('save-location-title')),
           const SizedBox(height: 6),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: SizedBox(
-                  height: _controlHeight,
-                  child: FTextField(
-                    key: const ValueKey('save-location-field'),
-                    control: FTextFieldControl.managed(
-                      controller: _pathController,
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              SizedBox(
-                height: _controlHeight,
-                child: FButton(
-                  key: const ValueKey('save-location-button'),
-                  size: FButtonSizeVariant.md,
-                  variant: FButtonVariant.outline,
-                  onPress: _chooseLocation,
-                  child: const Text('  选择  '),
-                ),
-              ),
-            ],
+          PathPickerField(
+            fieldKey: const ValueKey('save-location-field'),
+            buttonKey: const ValueKey('save-location-button'),
+            controller: _pathController,
+            onPick: _chooseLocation,
           ),
           if (_error != null) ...[
             const SizedBox(height: 5),
@@ -212,14 +182,13 @@ class _CreateArchiveFormState extends State<_CreateArchiveForm> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
+                      const DialogFormLabel(
                         '压缩格式',
-                        key: const ValueKey('archive-format-title'),
-                        style: smallTitleStyle,
+                        key: ValueKey('archive-format-title'),
                       ),
                       const SizedBox(height: 6),
                       SizedBox(
-                        height: _controlHeight,
+                        height: dialogControlHeight,
                         child: _buildFormatSelect(),
                       ),
                     ],
@@ -230,13 +199,13 @@ class _CreateArchiveFormState extends State<_CreateArchiveForm> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
+                      DialogFormLabel(
                         '压缩等级 ${_level.round()}',
                         key: const ValueKey('compression-level-title'),
-                        style: smallTitleStyle,
                       ),
+                      const SizedBox(height: 6),
                       SizedBox(
-                        height: _controlHeight,
+                        height: dialogControlHeight,
                         child: Slider(
                           value: _level,
                           min: 0,
@@ -252,23 +221,17 @@ class _CreateArchiveFormState extends State<_CreateArchiveForm> {
             ),
           ),
           // const SizedBox(height: 8),
-          Text(
+          const DialogFormLabel(
             '压缩密码',
-            key: const ValueKey('compression-password-title'),
-            style: smallTitleStyle,
+            key: ValueKey('compression-password-title'),
           ),
           const SizedBox(height: 6),
-          SizedBox(
-            height: _controlHeight,
-            child: FTextField(
-              key: const ValueKey('compression-password-field'),
-              control: FTextFieldControl.managed(
-                controller: _passwordController,
-              ),
-              enabled: _format.supportsPassword,
-              obscureText: true,
-              hint: '可选',
-            ),
+          DialogTextField(
+            key: const ValueKey('compression-password-field'),
+            controller: _passwordController,
+            enabled: _format.supportsPassword,
+            obscureText: true,
+            hint: '可选',
           ),
           FAccordion(
             control: FAccordionControl.lifted(
@@ -287,74 +250,78 @@ class _CreateArchiveFormState extends State<_CreateArchiveForm> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('压缩用途', style: smallTitleStyle),
+                    const DialogFormLabel('压缩用途'),
                     const SizedBox(height: 6),
-                    FSelect<CompressionPreset>(
-                      key: const ValueKey('compression-preset'),
-                      control: FSelectControl.lifted(
-                        value: _preset,
-                        onChange: (value) {
-                          if (value != null) {
-                            setState(() {
-                              _preset = value;
-                              _level = value.level.toDouble();
-                            });
-                          }
-                        },
-                      ),
-                      items: {
-                        for (final preset in CompressionPreset.values)
-                          preset.label: preset,
-                      },
-                    ),
-                    const SizedBox(height: 12),
-                    if (_format == ArchiveFormat.zip) ...[
-                      Text('密码加密方式', style: smallTitleStyle),
-                      const SizedBox(height: 6),
-                      FSelect<ZipEncryption>(
-                        key: const ValueKey('zip-encryption'),
+                    SizedBox(
+                      height: dialogControlHeight,
+                      child: FSelect<CompressionPreset>(
+                        key: const ValueKey('compression-preset'),
+                        style: dialogSelectStyle,
+                        textAlignVertical: TextAlignVertical.center,
                         control: FSelectControl.lifted(
-                          value: _zipEncryption,
+                          value: _preset,
                           onChange: (value) {
                             if (value != null) {
-                              setState(() => _zipEncryption = value);
+                              setState(() {
+                                _preset = value;
+                                _level = value.level.toDouble();
+                              });
                             }
                           },
                         ),
                         items: {
-                          for (final encryption in ZipEncryption.values)
-                            encryption.label: encryption,
+                          for (final preset in CompressionPreset.values)
+                            preset.label: preset,
                         },
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    if (_format == ArchiveFormat.zip) ...[
+                      const DialogFormLabel('密码加密方式'),
+                      const SizedBox(height: 6),
+                      SizedBox(
+                        height: dialogControlHeight,
+                        child: FSelect<ZipEncryption>(
+                          key: const ValueKey('zip-encryption'),
+                          style: dialogSelectStyle,
+                          textAlignVertical: TextAlignVertical.center,
+                          control: FSelectControl.lifted(
+                            value: _zipEncryption,
+                            onChange: (value) {
+                              if (value != null) {
+                                setState(() => _zipEncryption = value);
+                              }
+                            },
+                          ),
+                          items: {
+                            for (final encryption in ZipEncryption.values)
+                              encryption.label: encryption,
+                          },
+                        ),
                       ),
                       const SizedBox(height: 6),
                       const Text('AES-256 需要接收方使用支持此加密方式的解压软件。'),
                       const SizedBox(height: 12),
                     ],
-                    Text(
+                    const DialogFormLabel(
                       '分卷大小',
-                      key: const ValueKey('volume-size-title'),
-                      style: smallTitleStyle,
+                      key: ValueKey('volume-size-title'),
                     ),
                     const SizedBox(height: 6),
                     Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Expanded(
-                          child: SizedBox(
-                            height: _controlHeight,
-                            child: FTextField(
-                              key: const ValueKey('volume-size-field'),
-                              control: FTextFieldControl.managed(
-                                controller: _volumeController,
-                              ),
-                              keyboardType: TextInputType.number,
-                            ),
+                          child: DialogTextField(
+                            key: const ValueKey('volume-size-field'),
+                            controller: _volumeController,
+                            keyboardType: TextInputType.number,
                           ),
                         ),
                         const SizedBox(width: 8),
                         SizedBox(
                           width: 96,
-                          height: _controlHeight,
+                          height: dialogControlHeight,
                           child: _buildVolumeUnitSelect(),
                         ),
                       ],
@@ -389,6 +356,8 @@ class _CreateArchiveFormState extends State<_CreateArchiveForm> {
 
   Widget _buildFormatSelect() => FSelect<ArchiveFormat>.rich(
     key: const ValueKey('archive-format-select'),
+    style: dialogSelectStyle,
+    textAlignVertical: TextAlignVertical.center,
     control: FSelectControl.lifted(value: _format, onChange: _changeFormat),
     format: (format) => ' .${format.extension}',
     contentConstraints: const FAutoWidthPortalConstraints(maxHeight: 344),
@@ -404,6 +373,8 @@ class _CreateArchiveFormState extends State<_CreateArchiveForm> {
 
   Widget _buildVolumeUnitSelect() => FSelect<_VolumeUnit>(
     key: const ValueKey('volume-unit-select'),
+    style: dialogSelectStyle,
+    textAlignVertical: TextAlignVertical.center,
     control: FSelectControl.lifted(
       value: _volumeUnit,
       onChange: (unit) {

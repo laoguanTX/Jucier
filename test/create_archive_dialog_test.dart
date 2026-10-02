@@ -56,6 +56,14 @@ void main() {
       isNull,
     );
     final locationBounds = tester.getRect(locationField);
+    final buttonBounds = tester.getRect(locationButton);
+    expect(buttonBounds.top, locationBounds.top);
+    expect(buttonBounds.bottom, locationBounds.bottom);
+    final inputBounds = tester.getRect(
+      find.descendant(of: locationField, matching: find.byType(InputDecorator)),
+    );
+    expect(inputBounds.top, buttonBounds.top);
+    expect(inputBounds.bottom, buttonBounds.bottom);
     final editableBounds = tester.getRect(
       find.descendant(of: locationField, matching: find.byType(EditableText)),
     );
@@ -73,6 +81,10 @@ void main() {
             tester.getSize(locationField).height,
         epsilon: 1,
       ),
+    );
+    expect(
+      tester.getRect(find.byKey(const ValueKey('archive-format-select'))).top,
+      tester.getRect(find.byType(Slider)).top,
     );
 
     await tester.tap(find.byKey(const ValueKey('advanced-options-title')));
@@ -153,10 +165,13 @@ void main() {
           'compression-level-title',
           'compression-password-title',
           'volume-size-title',
-        ].map(
-          (key) =>
-              tester.widget<Text>(find.byKey(ValueKey(key))).style?.fontSize,
-        );
+        ].map((key) {
+          final text = find.descendant(
+            of: find.byKey(ValueKey(key)),
+            matching: find.byType(Text),
+          );
+          return tester.widget<Text>(text).style?.fontSize;
+        });
     expect(smallTitleFontSizes.toSet(), hasLength(1));
 
     final pageTitle = tester.widget<Text>(

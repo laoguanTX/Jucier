@@ -4,6 +4,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:path/path.dart' as p;
 
 import '../archive/archive_options.dart';
+import '../widgets/dialog_form.dart';
 
 typedef ExtractDirectoryPicker = Future<String?> Function({
   required String initialDirectory,
@@ -85,46 +86,44 @@ class _ExtractFormState extends State<_ExtractForm> {
         const SizedBox(height: 6),
         Text(p.basename(widget.archivePath), style: widget.style.bodyTextStyle),
         const SizedBox(height: 18),
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            Expanded(
-              child: TextField(
-                controller: _directoryController,
-                readOnly: true,
-                onTap: _chooseDirectory,
-                decoration: InputDecoration(
-                  labelText: '解压到',
-                  hintText: '请选择或新建一个文件夹',
-                ),
-              ),
-            ),
-            const SizedBox(width: 8),
-            FButton(
-              size: FButtonSizeVariant.sm,
-              variant: FButtonVariant.outline,
-              onPress: _chooseDirectory,
-              child: const Text('选择'),
-            ),
-          ],
+        const DialogFormLabel('解压到'),
+        const SizedBox(height: 6),
+        PathPickerField(
+          fieldKey: const ValueKey('extract-location-field'),
+          buttonKey: const ValueKey('extract-location-button'),
+          controller: _directoryController,
+          readOnly: true,
+          hint: '请选择或新建一个文件夹',
+          onPick: _chooseDirectory,
         ),
         const SizedBox(height: 14),
-        DropdownButtonFormField<ExtractionConflict>(
-          initialValue: _conflict,
-          decoration: const InputDecoration(labelText: '文件冲突'),
-          items: [
-            for (final option in ExtractionConflict.values)
-              DropdownMenuItem(value: option, child: Text(option.label)),
-          ],
-          onChanged: (value) {
-            if (value != null) setState(() => _conflict = value);
-          },
+        const DialogFormLabel('文件冲突'),
+        const SizedBox(height: 6),
+        SizedBox(
+          height: dialogControlHeight,
+          child: FSelect<ExtractionConflict>(
+            key: const ValueKey('extract-conflict-select'),
+            style: dialogSelectStyle,
+            textAlignVertical: TextAlignVertical.center,
+            control: FSelectControl.lifted(
+              value: _conflict,
+              onChange: (value) {
+                if (value != null) setState(() => _conflict = value);
+              },
+            ),
+            items: {
+              for (final option in ExtractionConflict.values)
+                option.label: option,
+            },
+          ),
         ),
         const SizedBox(height: 14),
-        TextField(
+        const DialogFormLabel('密码（可选）'),
+        const SizedBox(height: 6),
+        DialogTextField(
+          key: const ValueKey('extract-password-field'),
           controller: _passwordController,
           obscureText: true,
-          decoration: const InputDecoration(labelText: '密码（可选）'),
         ),
         const SizedBox(height: 22),
         Row(

@@ -10,6 +10,7 @@ import 'archive/seven_zip_engine.dart';
 import 'platform/archive_file_association_service.dart';
 import 'platform/archive_open_service.dart';
 import 'platform/archive_open_preference_store.dart';
+import 'platform/desktop_window_service.dart';
 import 'platform/file_access_service.dart';
 import 'platform/finder_action_service.dart';
 import 'widgets/windows_title_bar.dart';
@@ -52,6 +53,8 @@ class JucierApp extends StatefulWidget {
     this.archiveFileAssociationService,
     this.archiveOpenService,
     this.archiveOpenPreferenceStore,
+    this.desktopWindowService,
+    this.selectExternalExtractionDirectory,
     this.finderActionService,
     this.waitForInitialArchiveOpen = false,
   });
@@ -66,6 +69,8 @@ class JucierApp extends StatefulWidget {
   final ArchiveFileAssociationService? archiveFileAssociationService;
   final ArchiveOpenService? archiveOpenService;
   final ArchiveOpenPreferenceStore? archiveOpenPreferenceStore;
+  final DesktopWindowService? desktopWindowService;
+  final Future<String?> Function()? selectExternalExtractionDirectory;
   final FinderActionService? finderActionService;
   final bool waitForInitialArchiveOpen;
 
@@ -278,6 +283,10 @@ class _JucierAppState extends State<JucierApp> {
         fileAccessService: _fileAccessService,
         archiveFileAssociationService: _archiveFileAssociationService,
         archiveOpenService: _archiveOpenService,
+        desktopWindowService:
+            widget.desktopWindowService ?? const NativeDesktopWindowService(),
+        selectExternalExtractionDirectory:
+            widget.selectExternalExtractionDirectory,
         resolveExternalOpenPreferences: _resolveExternalOpenPreferences,
         archiveOpenMode: _archiveOpenMode,
         onArchiveOpenModeChanged: _setArchiveOpenMode,

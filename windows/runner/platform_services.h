@@ -25,6 +25,10 @@ class PlatformServices {
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>> window_channel_;
   flutter::EncodableList pending_actions_;
   HWND window_;
+  bool has_presented_main_window_ = false;
+  bool compact_operation_window_ = false;
+  bool shell_server_ = false;
+  WINDOWPLACEMENT saved_main_placement_ = {sizeof(WINDOWPLACEMENT)};
 };
 
 #endif  // RUNNER_PLATFORM_SERVICES_H_

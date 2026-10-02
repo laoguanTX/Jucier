@@ -11,6 +11,9 @@ import 'package:jucier/platform/archive_open_preference_store.dart';
 import 'package:jucier/platform/archive_open_service.dart';
 import 'package:jucier/platform/file_access_service.dart';
 import 'package:jucier/screens/home_screen.dart';
+import 'package:jucier/widgets/operation_progress.dart';
+
+import 'support/fake_desktop_window_service.dart';
 
 void main() {
   const channel = MethodChannel('dev.jucier/platform');
@@ -18,6 +21,15 @@ void main() {
       TestWidgetsFlutterBinding.ensureInitialized().defaultBinaryMessenger;
   setUp(() => messenger.setMockMethodCallHandler(channel, (_) async => null));
   tearDown(() => messenger.setMockMethodCallHandler(channel, null));
+  const finderChannel = MethodChannel('dev.jucier/finder_action');
+  setUp(
+    () => messenger.setMockMethodCallHandler(
+      finderChannel,
+      (call) async =>
+          call.method == 'takePendingFinderActions' ? <Object>[] : false,
+    ),
+  );
+  tearDown(() => messenger.setMockMethodCallHandler(finderChannel, null));
   testWidgets('a macOS open event navigates directly to the archive tree', (
     tester,
   ) async {
@@ -27,6 +39,7 @@ void main() {
     await tester.pumpWidget(
       JucierApp(
         engine: engine,
+        desktopWindowService: FakeDesktopWindowService(),
         fileAccessService: _GrantedFileAccessService(),
         archiveOpenService: openService,
         waitForInitialArchiveOpen: true,
@@ -71,6 +84,7 @@ void main() {
           await tester.pumpWidget(
             JucierApp(
               engine: engine,
+              desktopWindowService: FakeDesktopWindowService(),
               fileAccessService: _GrantedFileAccessService(),
               archiveOpenService: openService,
               archiveOpenPreferenceStore: _FixedArchiveOpenPreferenceStore(
@@ -118,6 +132,7 @@ void main() {
         await tester.pumpWidget(
           JucierApp(
             engine: engine,
+            desktopWindowService: FakeDesktopWindowService(),
             fileAccessService: _GrantedFileAccessService(),
             archiveOpenService: openService,
             archiveOpenPreferenceStore: _FixedArchiveOpenPreferenceStore(
@@ -129,7 +144,7 @@ void main() {
         expect(find.text('输入 from-finder.zip 的密码'), findsOneWidget);
         expect(engine.extractions, isEmpty);
         if (cancelPassword) {
-          await tester.tap(find.text('取消'));
+          await tester.tap(find.text('取消').last);
         } else {
           await tester.enterText(find.byType(EditableText), 'secret');
           await tester.tap(find.text('继续'));
@@ -137,7 +152,7 @@ void main() {
         await tester.pumpAndSettle();
         if (cancelPassword) {
           expect(engine.extractions, isEmpty);
-          expect(find.text('解压失败'), findsOneWidget);
+          expect(find.text('解压已取消'), findsOneWidget);
         } else {
           expect(engine.extractions.single.password, 'secret');
           expect(find.text('解压完成'), findsOneWidget);
@@ -159,6 +174,7 @@ void main() {
     await tester.pumpWidget(
       JucierApp(
         engine: engine,
+        desktopWindowService: FakeDesktopWindowService(),
         fileAccessService: _GrantedFileAccessService(),
         archiveOpenService: openService,
       ),
@@ -183,6 +199,7 @@ void main() {
       await tester.pumpWidget(
         JucierApp(
           engine: engine,
+          desktopWindowService: FakeDesktopWindowService(),
           fileAccessService: _GrantedFileAccessService(),
           archiveOpenService: _FakeArchiveOpenService(null),
           archiveOpenPreferenceStore: _FixedArchiveOpenPreferenceStore(
@@ -199,6 +216,125 @@ void main() {
       expect(find.byKey(const ValueKey('archive-page')), findsOneWidget);
     },
   );
+
+  testWidgets(
+    'cold extraction shows live progress then the result in one window',
+    (tester) async {
+      final extraction = Completer<void>();
+      final engine = _ExtractionArchiveEngine(extraction: extraction);
+      final windows = FakeDesktopWindowService();
+      final openService = _FakeArchiveOpenService('/tmp/from-finder.zip');
+      await tester.pumpWidget(
+        JucierApp(
+          engine: engine,
+          desktopWindowService: windows,
+          fileAccessService: _GrantedFileAccessService(),
+          archiveOpenService: openService,
+          archiveOpenPreferenceStore: _FixedArchiveOpenPreferenceStore(
+            Future.value(ArchiveOpenMode.extract),
+          ),
+          waitForInitialArchiveOpen: true,
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey('external-operation-window')),
+        findsOneWidget,
+      );
+      expect(find.byType(HomeScreen), findsNothing);
+      expect(windows.mainShows, 0);
+      expect(windows.operationShows, 1);
+      engine.reportProgress!(0.42);
+      await tester.pump();
+      expect(find.text('42%'), findsOneWidget);
+      extraction.complete();
+      await tester.pumpAndSettle();
+      expect(find.text('解压完成'), findsOneWidget);
+      expect(find.byType(OperationProgress), findsNothing);
+      expect(windows.finishCalls, 0);
+      await tester.tap(find.text('好'));
+      await tester.pumpAndSettle();
+      expect(windows.finishCalls, 1);
+      expect(openService.quitCalls, 1);
+      expect(windows.mainShows, 0);
+    },
+  );
+
+  for (final compact in [false, true]) {
+    testWidgets(
+      'external extraction preserves an existing ${compact ? 'hidden' : 'visible'} workspace',
+      (tester) async {
+        final engine = _ExtractionArchiveEngine();
+        final windows = FakeDesktopWindowService(
+          compact: compact,
+          quitAfterOperation: false,
+        );
+        final openService = _FakeArchiveOpenService(null);
+        await tester.pumpWidget(
+          JucierApp(
+            engine: engine,
+            desktopWindowService: windows,
+            fileAccessService: _GrantedFileAccessService(),
+            archiveOpenService: openService,
+            archiveOpenPreferenceStore: _FixedArchiveOpenPreferenceStore(
+              Future.value(ArchiveOpenMode.extract),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.widget<HomeScreen>(find.byType(HomeScreen)).onDropped([
+          '/tmp/workspace.zip',
+        ]);
+        await tester.pumpAndSettle();
+        final mainShows = windows.mainShows;
+        unawaited(openService.dispatch('/tmp/from-finder.zip'));
+        await tester.pumpAndSettle();
+        expect(
+          find.byKey(const ValueKey('external-operation-window')),
+          compact ? findsOneWidget : findsNothing,
+        );
+        expect(find.text('解压完成'), findsOneWidget);
+        await tester.tap(find.text('好'));
+        await tester.pumpAndSettle();
+        expect(find.byKey(const ValueKey('archive-page')), findsOneWidget);
+        expect(
+          engine.listCalls.where((path) => path == '/tmp/workspace.zip'),
+          hasLength(1),
+        );
+        expect(windows.mainShows, mainShows);
+        expect(windows.finishCalls, compact ? 1 : 0);
+        expect(openService.quitCalls, 0);
+      },
+    );
+  }
+
+  testWidgets(
+    'cancel during smart extraction preparation prevents extraction',
+    (tester) async {
+      final listing = Completer<void>();
+      final engine = _ExtractionArchiveEngine(listing: listing);
+      final openService = _FakeArchiveOpenService('/tmp/from-finder.zip');
+      await tester.pumpWidget(
+        JucierApp(
+          engine: engine,
+          desktopWindowService: FakeDesktopWindowService(),
+          fileAccessService: _GrantedFileAccessService(),
+          archiveOpenService: openService,
+          archiveOpenPreferenceStore: _FixedArchiveOpenPreferenceStore(
+            Future.value(ArchiveOpenMode.extract),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('取消'));
+      listing.complete();
+      await tester.pumpAndSettle();
+      expect(engine.extractions, isEmpty);
+      expect(find.text('解压已取消'), findsOneWidget);
+      await tester.tap(find.text('好'));
+      await tester.pumpAndSettle();
+    },
+  );
 }
 
 class _FixedArchiveOpenPreferenceStore implements ArchiveOpenPreferenceStore {
@@ -213,14 +349,22 @@ class _FixedArchiveOpenPreferenceStore implements ArchiveOpenPreferenceStore {
 }
 
 class _ExtractionArchiveEngine implements ArchiveEngine {
-  _ExtractionArchiveEngine({this.requiredPassword});
+  _ExtractionArchiveEngine({
+    this.requiredPassword,
+    this.extraction,
+    this.listing,
+  });
   final String? requiredPassword;
+  final Completer<void>? extraction;
+  final Completer<void>? listing;
+  ProgressCallback? reportProgress;
   final extractions = <ExtractArchiveOptions>[];
   final listCalls = <String>[];
 
   @override
   Future<ArchiveListing> list(String archivePath, {String? password}) async {
     listCalls.add(archivePath);
+    await listing?.future;
     if (requiredPassword != null && password != requiredPassword) {
       throw const ArchivePasswordRequiredException();
     }
@@ -239,6 +383,16 @@ class _ExtractionArchiveEngine implements ArchiveEngine {
     ProgressCallback? onProgress,
   }) async {
     extractions.add(options);
+    reportProgress = onProgress;
+    onProgress?.call(0);
+    await extraction?.future;
+  }
+
+  @override
+  Future<void> cancel() async {
+    if (extraction?.isCompleted == false) {
+      extraction!.completeError(const ArchiveCancelledException());
+    }
   }
 
   @override

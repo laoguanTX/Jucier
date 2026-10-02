@@ -126,6 +126,18 @@ Attributes = A
             null,
           ),
         );
+        const finderChannel = MethodChannel('dev.jucier/finder_action');
+        tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          finderChannel,
+          (call) async =>
+              call.method == 'takePendingFinderActions' ? <Object>[] : false,
+        );
+        addTearDown(
+          () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+            finderChannel,
+            null,
+          ),
+        );
         await tester.pumpWidget(
           const JucierApp(waitForInitialArchiveOpen: true),
         );

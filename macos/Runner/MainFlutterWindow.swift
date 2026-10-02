@@ -117,6 +117,11 @@ class MainFlutterWindow: NSWindow {
   private let extractionArchiveColumnsKey = "extractionArchiveColumns"
   private let finderContextMenuInstalledKey = "finderContextMenuInstalled"
   private var completedInitialArchiveOpenCheck = false
+  private var hasPresentedMainWindow = false
+  private var compactOperationWindow = false
+  private var savedMainFrame: NSRect?
+  private var savedMainMiniaturized = false
+  private var savedMainHidden = false
   private var scopedURL: URL?
   private var archiveDragSource: ArchiveFilePromiseDragSource?
   private var archiveDragResult: FlutterResult?
@@ -140,12 +145,79 @@ class MainFlutterWindow: NSWindow {
 
     RegisterGeneratedPlugins(registry: flutterViewController)
     configurePlatformChannel(flutterViewController)
+    configureWindowChannel(flutterViewController)
     configureArchiveOpenChannel(flutterViewController)
     configureFinderActionChannel(flutterViewController)
     configureFileDragChannel(flutterViewController)
     restoreFileAccess()
 
     super.awakeFromNib()
+    orderOut(nil)
+    // FlutterViewController normally starts its engine in viewWillAppear.
+    // The launch window stays hidden until Dart selects Home or a quick action,
+    // so start the engine explicitly to break that visibility dependency.
+    flutterViewController.engine.run(withEntrypoint: nil)
+  }
+
+  private func configureWindowChannel(_ controller: FlutterViewController) {
+    let channel = FlutterMethodChannel(
+      name: "dev.jucier/window",
+      binaryMessenger: controller.engine.binaryMessenger)
+    channel.setMethodCallHandler { [weak self] call, result in
+      guard let self else { result(nil); return }
+      switch call.method {
+      case "prepareOperationWindow":
+        if self.hasPresentedMainWindow && self.isVisible && !self.isMiniaturized && !NSApp.isHidden {
+          result(false)
+          return
+        }
+        self.savedMainFrame = self.frame
+        self.savedMainMiniaturized = self.isMiniaturized
+        self.savedMainHidden = NSApp.isHidden
+        self.compactOperationWindow = true
+        self.orderOut(nil)
+        self.minSize = NSSize(width: 560, height: 360)
+        self.styleMask.remove([.resizable, .miniaturizable])
+        self.setContentSize(NSSize(width: 560, height: 360))
+        self.center()
+        result(true)
+      case "showPreparedWindow":
+        if self.compactOperationWindow {
+          if self.isMiniaturized { self.deminiaturize(nil) }
+          NSApp.unhide(nil)
+          self.makeKeyAndOrderFront(nil)
+          NSApp.activate(ignoringOtherApps: true)
+        }
+        result(nil)
+      case "configureOperationWindow":
+        if self.compactOperationWindow {
+          self.setContentSize(NSSize(width: 560, height: call.arguments as? Bool == true ? 660 : 360))
+        }
+        result(nil)
+      case "showMainWindow":
+        if !self.compactOperationWindow {
+          self.hasPresentedMainWindow = true
+          self.makeKeyAndOrderFront(nil)
+          NSApp.activate(ignoringOtherApps: true)
+        }
+        result(nil)
+      case "finishOperationWindow":
+        self.orderOut(nil)
+        self.compactOperationWindow = false
+        self.styleMask.insert([.resizable, .miniaturizable])
+        self.minSize = NSSize(width: 720, height: 520)
+        if let frame = self.savedMainFrame { self.setFrame(frame, display: false) }
+        if self.savedMainMiniaturized && self.hasPresentedMainWindow {
+          self.miniaturize(nil)
+        }
+        if self.savedMainHidden && self.hasPresentedMainWindow {
+          NSApp.hide(nil)
+        }
+        result(!self.hasPresentedMainWindow)
+      default:
+        result(FlutterMethodNotImplemented)
+      }
+    }
   }
 
   private func configureFileDragChannel(_ controller: FlutterViewController) {

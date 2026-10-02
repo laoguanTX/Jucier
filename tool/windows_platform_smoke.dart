@@ -17,6 +17,16 @@ Future<void> main() async {
     if (await window.invokeMethod<bool>('windowState') != false) {
       throw StateError('Initial window state is not restored');
     }
+    if (await window.invokeMethod<bool>('prepareOperationWindow') != true) {
+      throw StateError('Cold quick action did not select the compact window');
+    }
+    await window.invokeMethod<void>('configureOperationWindow', true);
+    await window.invokeMethod<void>('configureOperationWindow', false);
+    if (await window.invokeMethod<bool>('finishOperationWindow') != true) {
+      throw StateError(
+        'Cold quick action did not request temporary-session exit',
+      );
+    }
     if (await finderAction.invokeMethod<bool>('finderContextMenuAvailable') ==
         null) {
       throw StateError('Explorer integration status channel failed');

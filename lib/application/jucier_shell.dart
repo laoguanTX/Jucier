@@ -26,12 +26,14 @@ import '../platform/archive_drag_service.dart';
 import '../platform/archive_file_association_service.dart';
 import '../platform/archive_open_service.dart';
 import '../platform/archive_open_preference_store.dart';
+import '../platform/desktop_window_service.dart';
 import '../platform/file_preview_service.dart';
 import '../platform/single_entry_extraction_preference_store.dart';
 import '../screens/archive_screen.dart';
 import '../screens/home_screen.dart';
 import '../screens/settings_screen.dart';
 import '../widgets/operation_progress.dart';
+import '../widgets/external_operation_view.dart';
 import 'archive_draft.dart';
 import 'archive_workflow_controller.dart';
 import 'settings_page_transition.dart';
@@ -51,6 +53,8 @@ class JucierShell extends StatefulWidget {
     required this.finderActionService,
     this.waitForInitialArchiveOpen = false,
     this.resolveExternalOpenPreferences,
+    this.desktopWindowService = const NativeDesktopWindowService(),
+    this.selectExternalExtractionDirectory,
     this.archiveOpenMode = ArchiveOpenMode.open,
     this.onArchiveOpenModeChanged,
     this.themeMode = ThemeMode.system,
@@ -72,6 +76,8 @@ class JucierShell extends StatefulWidget {
   final FileAccessService fileAccessService;
   final ArchiveFileAssociationService archiveFileAssociationService;
   final ArchiveOpenService archiveOpenService;
+  final DesktopWindowService desktopWindowService;
+  final Future<String?> Function()? selectExternalExtractionDirectory;
   final FinderActionService finderActionService;
   final bool waitForInitialArchiveOpen;
   final Future<ArchiveOpenPreferences> Function()?
@@ -109,6 +115,14 @@ class _JucierShellState extends State<JucierShell> {
   bool _settingsOpen = false;
   bool _creatingArchive = false;
   bool _draftLoading = false;
+  bool _compactOperation = false;
+  bool _externalOnlySession = false;
+  String _externalOperationTitle = '';
+  String? _externalOperationMessage;
+  bool _externalOperationFailed = false;
+  bool _externalOperationCancelled = false;
+  Completer<void>? _externalResultClosed;
+  Future<void> _externalOperationQueue = Future.value();
   int _draftGeneration = 0;
   List<String> _draftSources = [];
   ArchiveListing _draftListing = const ArchiveListing(
@@ -137,7 +151,6 @@ class _JucierShellState extends State<JucierShell> {
     widget.finderActionService.setHandler(_handleFinderAction);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       unawaited(_synchronizeExternalOpenRequests());
-      unawaited(widget.finderActionService.synchronize());
       unawaited(_requestInitialAccess());
     });
   }
@@ -147,6 +160,9 @@ class _JucierShellState extends State<JucierShell> {
     widget.fileAccessService.setOpenSettingsHandler(null);
     widget.archiveOpenService.setHandler(null);
     widget.finderActionService.setHandler(null);
+    if (_externalResultClosed?.isCompleted == false) {
+      _externalResultClosed!.complete();
+    }
     unawaited(_previews.dispose());
     _archiveDragService.dispose();
     _workflow.dispose();
@@ -177,7 +193,7 @@ class _JucierShellState extends State<JucierShell> {
           autofocus: true,
           child: FScaffold(
             childPad: false,
-            footer: _workflow.operationLabel == null
+            footer: _compactOperation || _workflow.operationLabel == null
                 ? null
                 : ValueListenableBuilder<double?>(
                     valueListenable: _workflow.progressChanges,
@@ -192,7 +208,25 @@ class _JucierShellState extends State<JucierShell> {
               padding: EdgeInsets.only(
                 top: _isMacOS ? _macOSTrafficLightInset : 0,
               ),
-              child: SettingsPageTransition(child: _buildCurrentPage()),
+              child: _compactOperation
+                  ? ValueListenableBuilder<double?>(
+                      valueListenable: _workflow.progressChanges,
+                      builder: (context, progress, _) => ExternalOperationView(
+                        key: const ValueKey('external-operation-window'),
+                        title: _externalOperationTitle,
+                        label: _workflow.operationLabel ?? '正在准备',
+                        progress: _workflow.busy ? progress : 0,
+                        message: _externalOperationMessage,
+                        failed: _externalOperationFailed,
+                        onCancel: _cancelExternalOperation,
+                        onClose: () {
+                          if (_externalResultClosed?.isCompleted == false) {
+                            _externalResultClosed!.complete();
+                          }
+                        },
+                      ),
+                    )
+                  : SettingsPageTransition(child: _buildCurrentPage()),
             ),
           ),
         ),
@@ -282,12 +316,86 @@ class _JucierShellState extends State<JucierShell> {
   }
 
   void _openSettings() {
-    if (mounted) setState(() => _settingsOpen = true);
+    if (mounted && !_compactOperation) {
+      setState(() => _settingsOpen = true);
+      unawaited(widget.desktopWindowService.showMainWindow());
+    }
   }
 
   Future<void> _synchronizeExternalOpenRequests() async {
+    // Drain contextual actions first so cold quick actions never show Home.
+    await widget.finderActionService.synchronize();
     await widget.archiveOpenService.synchronize();
     if (mounted) setState(() => _checkingForExternalArchive = false);
+    if (mounted && !_externalOnlySession && !_compactOperation) {
+      await _revealMainWindow(explicit: false);
+    }
+  }
+
+  Future<void> _revealMainWindow({bool explicit = true}) async {
+    await _prepareWindowFrame();
+    if (mounted) {
+      await widget.desktopWindowService.showMainWindow(explicit: explicit);
+    }
+  }
+
+  Future<void> _prepareWindowFrame() async {
+    // Hidden/minimized desktop windows may stop receiving vsync. Build the
+    // selected view without waiting for a native frame that requires visibility.
+    WidgetsBinding.instance.scheduleWarmUpFrame();
+    await WidgetsBinding.instance.endOfFrame;
+  }
+
+  Future<void> _runExternalOperation(
+    String title,
+    Future<void> Function() action,
+  ) {
+    final previous = _externalOperationQueue;
+    final operation = () async {
+      await previous;
+      await _workflow.waitUntilIdle();
+      if (!mounted) return;
+      final compact = await widget.desktopWindowService.prepareOperation();
+      if (!mounted) return;
+      _externalOperationCancelled = false;
+      if (compact) {
+        setState(() {
+          _compactOperation = true;
+          _externalOperationTitle = title;
+          _externalOperationMessage = null;
+          _externalOperationFailed = false;
+        });
+        await _prepareWindowFrame();
+        if (!mounted) return;
+        await widget.desktopWindowService.showPreparedWindow();
+      }
+      try {
+        await action();
+      } on FileSystemException catch (error) {
+        await _showExternalOperationResult(
+          title: '$title失败',
+          message: error.message,
+          failed: true,
+        );
+      } finally {
+        if (compact && mounted) {
+          final quit = await widget.desktopWindowService.finishOperation();
+          if (quit) {
+            _externalOnlySession = true;
+            await widget.archiveOpenService.quitApplication();
+          } else {
+            setState(() => _compactOperation = false);
+          }
+        }
+      }
+    }();
+    _externalOperationQueue = operation.catchError((Object _) {});
+    return operation;
+  }
+
+  Future<void> _cancelExternalOperation() async {
+    _externalOperationCancelled = true;
+    await _workflow.cancel();
   }
 
   Future<void> _requestInitialAccess() async {
@@ -425,19 +533,19 @@ class _JucierShellState extends State<JucierShell> {
     }
   }
 
-  Future<void> _openExternalArchive(
-    String path, {
-    bool useDefaultAction = true,
-  }) async {
+  Future<void> _openExternalArchive(String path) async {
     if (!isSupportedArchivePath(path)) return;
     final preferences = await _externalOpenPreferences();
     if (!mounted) return;
     await _workflow.waitUntilIdle();
     if (!mounted) return;
-    if (useDefaultAction && preferences.mode == ArchiveOpenMode.extract) {
-      await _extractArchivesBesideSource([
-        path,
-      ], smartExtractionEnabled: preferences.smartExtractionEnabled);
+    if (preferences.mode == ArchiveOpenMode.extract) {
+      await _runExternalOperation(
+        '解压文件',
+        () => _extractArchivesBesideSource([
+          path,
+        ], smartExtractionEnabled: preferences.smartExtractionEnabled),
+      );
       return;
     }
     setState(() {
@@ -456,6 +564,7 @@ class _JucierShellState extends State<JucierShell> {
       return;
     }
     setState(() => _openingExternalArchive = false);
+    await _revealMainWindow();
   }
 
   Future<ArchiveOpenPreferences> _externalOpenPreferences() async =>
@@ -473,41 +582,59 @@ class _JucierShellState extends State<JucierShell> {
       case FinderActionType.extractHere:
         final preferences = await _externalOpenPreferences();
         if (!mounted) return;
-        await _extractArchivesBesideSource(
-          request.paths,
-          smartExtractionEnabled: preferences.smartExtractionEnabled,
+        await _runExternalOperation(
+          '解压文件',
+          () => _extractArchivesBesideSource(
+            request.paths,
+            smartExtractionEnabled: preferences.smartExtractionEnabled,
+          ),
         );
       case FinderActionType.extractTo:
-        final archives = request.paths.where(isSupportedArchivePath).toList();
-        if (archives.length == 1) {
-          await _openExternalArchive(archives.single, useDefaultAction: false);
-        }
+        final preferences = await _externalOpenPreferences();
+        if (!mounted) return;
+        await _runExternalOperation('解压文件', () async {
+          final directory =
+              await (widget.selectExternalExtractionDirectory?.call() ??
+                  getDirectoryPath(confirmButtonText: '解压到这里'));
+          if (!mounted) return;
+          if (directory == null) {
+            await _showExternalOperationResult(
+              title: '解压已取消',
+              message: '操作已取消。',
+            );
+            return;
+          }
+          await _extractArchivesBesideSource(
+            request.paths,
+            smartExtractionEnabled: preferences.smartExtractionEnabled,
+            outputDirectory: directory,
+          );
+        });
       case FinderActionType.compressZip:
-        await _compressFinderSourcesToZip(request.paths);
+        await _runExternalOperation(
+          '压缩文件',
+          () => _compressFinderSourcesToZip(request.paths),
+        );
       case FinderActionType.compress:
-        _prepareForFinderWorkflow();
-        _startArchiveDraft();
-        await _addDraftSources(request.paths);
+        await _runExternalOperation(
+          '压缩文件',
+          () => _configureExternalArchive(request.paths),
+        );
     }
-  }
-
-  void _prepareForFinderWorkflow() {
-    _externalArchiveSession = false;
-    _settingsOpen = false;
-    if (_workflow.listing != null) _workflow.closeArchive();
   }
 
   Future<void> _extractArchivesBesideSource(
     List<String> paths, {
     required bool smartExtractionEnabled,
+    String? outputDirectory,
   }) async {
     final archives = paths.where(isSupportedArchivePath).toList();
-    _prepareForFinderWorkflow();
 
     if (archives.isEmpty) {
-      await _showExternalExtractionResult(
+      await _showExternalOperationResult(
         title: '解压失败',
         message: '所选项目中没有支持的压缩包。',
+        failed: true,
       );
       return;
     }
@@ -520,6 +647,7 @@ class _JucierShellState extends State<JucierShell> {
       final outcome = await _extractArchiveBesideSource(
         archivePath,
         smartExtractionEnabled: smartExtractionEnabled,
+        outputDirectory: outputDirectory,
       );
       if (!outcome.succeeded) {
         stopped = outcome;
@@ -532,42 +660,59 @@ class _JucierShellState extends State<JucierShell> {
     if (!mounted) return;
     if (stopped != null) {
       final prefix = completed == 0 ? '' : '已成功解压 $completed 个压缩包。\n\n';
-      await _showExternalExtractionResult(
-        title: '解压失败',
+      await _showExternalOperationResult(
+        title: stopped.cancelled ? '解压已取消' : '解压失败',
         message: '$prefix${p.basename(stopped.archivePath)}：${stopped.error}',
+        failed: !stopped.cancelled,
       );
       return;
     }
 
-    await _showExternalExtractionResult(
+    await _showExternalOperationResult(
       title: '解压完成',
       message: completed == 1
           ? '文件已保存到 $completedDirectory'
-          : '$completed 个压缩包已解压到各自所在位置。',
+          : outputDirectory == null
+          ? '$completed 个压缩包已解压到各自所在位置。'
+          : '$completed 个压缩包已保存到 $outputDirectory。',
     );
   }
 
-  Future<void> _showExternalExtractionResult({
+  Future<void> _showExternalOperationResult({
     required String title,
     required String message,
+    bool failed = false,
   }) async {
     if (!mounted) return;
-    await showMessageDialog(context, title: title, message: message);
-    if (mounted) await widget.archiveOpenService.quitApplication();
+    if (_compactOperation) {
+      final closed = Completer<void>();
+      _externalResultClosed = closed;
+      setState(() {
+        _externalOperationTitle = title;
+        _externalOperationMessage = message;
+        _externalOperationFailed = failed;
+      });
+      await closed.future;
+      _externalResultClosed = null;
+    } else {
+      await showMessageDialog(context, title: title, message: message);
+    }
   }
 
   Future<_ArchiveExtractionOutcome> _extractArchiveBesideSource(
     String archivePath, {
     required bool smartExtractionEnabled,
+    String? outputDirectory,
     String? password,
   }) async {
     try {
       final destination = smartExtractionEnabled
           ? smartExtractionDirectory(
               await widget.engine.list(archivePath, password: password),
-              p.dirname(archivePath),
+              outputDirectory ?? p.dirname(archivePath),
             )
-          : p.dirname(archivePath);
+          : outputDirectory ?? p.dirname(archivePath);
+      if (_externalOperationCancelled) throw const ArchiveCancelledException();
       await _workflow.extract(
         ExtractArchiveOptions(
           archivePath: archivePath,
@@ -585,21 +730,22 @@ class _JucierShellState extends State<JucierShell> {
         title: '输入 ${p.basename(archivePath)} 的密码',
       );
       if (entered == null || !mounted) {
-        return _ArchiveExtractionOutcome.failed(archivePath, '操作已取消。');
+        return _ArchiveExtractionOutcome.cancelled(archivePath);
       }
       return _extractArchiveBesideSource(
         archivePath,
         smartExtractionEnabled: smartExtractionEnabled,
+        outputDirectory: outputDirectory,
         password: entered,
       );
     } on ArchiveCancelledException {
-      return _ArchiveExtractionOutcome.failed(archivePath, '操作已取消。');
+      return _ArchiveExtractionOutcome.cancelled(archivePath);
     } on ArchiveException catch (error) {
       return _ArchiveExtractionOutcome.failed(archivePath, error.message);
     }
   }
 
-  Future<void> _compressFinderSourcesToZip(List<String> paths) async {
+  Future<List<String>> _existingSources(List<String> paths) async {
     final sources = <String>[];
     for (final path in paths) {
       if (!sources.any((existing) => p.equals(existing, path)) &&
@@ -607,35 +753,85 @@ class _JucierShellState extends State<JucierShell> {
         sources.add(path);
       }
     }
-    if (sources.isEmpty || !mounted) return;
-    _prepareForFinderWorkflow();
+    if (sources.isEmpty && mounted) {
+      await _showExternalOperationResult(
+        title: '压缩失败',
+        message: '所选文件已不存在。',
+        failed: true,
+      );
+    }
+    return sources;
+  }
+
+  Future<void> _configureExternalArchive(List<String> paths) async {
+    final sources = await _existingSources(paths);
+    if (!mounted || sources.isEmpty) return;
+    if (_compactOperation) {
+      await widget.desktopWindowService.configureOperationWindow(true);
+    }
+    if (!mounted) return;
+    final options = await showCreateArchiveDialog(context, sources: sources);
+    if (!mounted) return;
+    if (_compactOperation) {
+      await widget.desktopWindowService.configureOperationWindow(false);
+    }
+    if (options == null) {
+      await _showExternalOperationResult(title: '压缩已取消', message: '操作已取消。');
+      return;
+    }
+    if (!await _confirmArchiveReplacement(options) || !mounted) {
+      await _showExternalOperationResult(title: '压缩已取消', message: '操作已取消。');
+      return;
+    }
+    await _createExternalArchive(options);
+  }
+
+  Future<void> _compressFinderSourcesToZip(List<String> paths) async {
+    final sources = await _existingSources(paths);
+    if (!mounted || sources.isEmpty) return;
     final archivePath = await _availableZipPath(sources);
 
+    await _createExternalArchive(
+      CreateArchiveOptions(
+        archivePath: archivePath,
+        sources: sources,
+        format: ArchiveFormat.zip,
+      ),
+    );
+  }
+
+  Future<void> _createExternalArchive(CreateArchiveOptions options) async {
     try {
-      await _workflow.create(
-        CreateArchiveOptions(
-          archivePath: archivePath,
-          sources: sources,
-          format: ArchiveFormat.zip,
-        ),
-        openAfterCreate: false,
+      if (_externalOperationCancelled) throw const ArchiveCancelledException();
+      await _workflow.create(options, openAfterCreate: false);
+      await _showExternalOperationResult(
+        title: '压缩完成',
+        message: '压缩包已保存到 ${options.archivePath}',
       );
-      if (mounted) {
-        unawaited(
-          showMessageDialog(
-            context,
-            title: '压缩完成',
-            message: '压缩包已保存到 $archivePath',
-          ),
-        );
-      }
     } on ArchiveCancelledException {
-      // Explicit cancellations do not need an error dialog.
+      await _showExternalOperationResult(title: '压缩已取消', message: '操作已取消。');
     } on ArchiveException catch (error) {
-      if (mounted) {
-        await showArchiveErrorDialog(context, title: '压缩失败', error: error);
-      }
+      await _showExternalOperationResult(
+        title: error is ArchiveWarningException ? '部分完成' : '压缩失败',
+        message: error.message,
+        failed: true,
+      );
     }
+  }
+
+  Future<bool> _confirmArchiveReplacement(CreateArchiveOptions options) async {
+    if (!await File(options.archivePath).exists() &&
+        !await File('${options.archivePath}.001').exists()) {
+      return true;
+    }
+    if (!mounted) return false;
+    return showConfirmationDialog(
+      context,
+      title: '替换已有压缩包？',
+      message: '新压缩包将替换 ${p.basename(options.archivePath)}，旧包中的其他文件不会保留。',
+      confirmLabel: '替换',
+      destructive: true,
+    );
   }
 
   Future<String> _availableZipPath(List<String> sources) async {
@@ -676,18 +872,7 @@ class _JucierShellState extends State<JucierShell> {
     if (options == null || !mounted) return;
 
     try {
-      if (await File(options.archivePath).exists() ||
-          await File('${options.archivePath}.001').exists()) {
-        if (!mounted) return;
-        final replace = await showConfirmationDialog(
-          context,
-          title: '替换已有压缩包？',
-          message: '新压缩包将替换 ${p.basename(options.archivePath)}，旧包中的其他文件不会保留。',
-          confirmLabel: '替换',
-          destructive: true,
-        );
-        if (!replace || !mounted) return;
-      }
+      if (!await _confirmArchiveReplacement(options) || !mounted) return;
       await _workflow.create(options);
       if (mounted) {
         setState(() {
@@ -1289,6 +1474,7 @@ class _ArchiveExtractionOutcome {
     required this.succeeded,
     this.error,
     this.outputDirectory,
+    this.cancelled = false,
   });
 
   const _ArchiveExtractionOutcome.succeeded(
@@ -1303,10 +1489,19 @@ class _ArchiveExtractionOutcome {
   const _ArchiveExtractionOutcome.failed(String archivePath, String error)
     : this._(archivePath: archivePath, succeeded: false, error: error);
 
+  const _ArchiveExtractionOutcome.cancelled(String archivePath)
+    : this._(
+        archivePath: archivePath,
+        succeeded: false,
+        error: '操作已取消。',
+        cancelled: true,
+      );
+
   final String archivePath;
   final bool succeeded;
   final String? outputDirectory;
   final String? error;
+  final bool cancelled;
 }
 
 class _ArchiveDragPayload {

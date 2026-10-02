@@ -1,6 +1,6 @@
-import 'dart:async';
-
 import 'package:flutter/services.dart';
+
+import 'desktop_request_drain.dart';
 
 enum FinderActionType {
   extractHere,
@@ -64,8 +64,18 @@ class MacOSFinderActionService implements FinderActionService {
 
   final MethodChannel _channel;
   FinderActionHandler? _handler;
-  bool _draining = false;
-  bool _drainRequested = false;
+  late final _requests = DesktopRequestDrain<Object?>(
+    readPending: () =>
+        _channel.invokeListMethod<Object?>('takePendingFinderActions'),
+    hasHandler: () => _handler != null,
+    dispatch: (value) async {
+      try {
+        await _handler?.call(FinderActionRequest.fromPlatform(value));
+      } on FormatException {
+        // Ignore malformed requests without blocking later ones.
+      }
+    },
+  );
 
   @override
   void setHandler(FinderActionHandler? handler) {
@@ -74,10 +84,7 @@ class MacOSFinderActionService implements FinderActionService {
   }
 
   @override
-  Future<void> synchronize() {
-    _drainRequested = true;
-    return _drainPendingActions();
-  }
+  Future<void> synchronize() => _requests.synchronize();
 
   @override
   Future<bool> contextMenuAvailable() async {
@@ -103,42 +110,8 @@ class MacOSFinderActionService implements FinderActionService {
 
   Future<Object?> _handleNativeCall(MethodCall call) async {
     if (call.method == 'finderActionsAvailable') {
-      _drainRequested = true;
-      await _drainPendingActions();
+      await synchronize();
     }
     return null;
-  }
-
-  Future<void> _drainPendingActions() async {
-    if (_draining || _handler == null) return;
-    _draining = true;
-    _drainRequested = false;
-    try {
-      while (_handler != null) {
-        final values = await _channel.invokeListMethod<Object?>(
-          'takePendingFinderActions',
-        );
-        if (values == null || values.isEmpty) break;
-        for (final value in values) {
-          final handler = _handler;
-          if (handler == null) return;
-          try {
-            await handler(FinderActionRequest.fromPlatform(value));
-          } on FormatException {
-            // Ignore malformed extension requests without blocking later ones.
-          }
-        }
-      }
-    } on MissingPluginException {
-      // Other platforms may not implement desktop contextual menus.
-    } on PlatformException {
-      // A later native event will retry the pending-action drain.
-    } finally {
-      _draining = false;
-      if (_drainRequested && _handler != null) {
-        _drainRequested = false;
-        unawaited(_drainPendingActions());
-      }
-    }
   }
 }

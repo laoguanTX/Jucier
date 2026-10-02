@@ -15,6 +15,9 @@ import 'package:jucier/platform/file_access_service.dart';
 import 'package:jucier/platform/finder_action_service.dart';
 import 'package:jucier/platform/archive_open_service.dart';
 import 'package:jucier/platform/archive_open_preference_store.dart';
+import 'package:material_ui/material_ui.dart' show InputDecorator;
+
+import 'support/fake_desktop_window_service.dart';
 
 void main() {
   const channel = MethodChannel('dev.jucier/platform');
@@ -47,6 +50,7 @@ void main() {
     await tester.pumpWidget(
       JucierApp(
         engine: engine,
+        desktopWindowService: FakeDesktopWindowService(),
         fileAccessService: _GrantedFileAccessService(),
         finderActionService: service,
         archiveOpenService: openService,
@@ -90,6 +94,7 @@ void main() {
     await tester.pumpWidget(
       JucierApp(
         engine: engine,
+        desktopWindowService: FakeDesktopWindowService(),
         fileAccessService: _GrantedFileAccessService(),
         finderActionService: service,
         archiveOpenService: openService,
@@ -97,6 +102,7 @@ void main() {
     );
     unawaited(service.dispatch());
     await tester.pump(const Duration(milliseconds: 400));
+    await tester.pumpAndSettle();
 
     expect(find.text('解压失败'), findsOneWidget);
     expect(find.textContaining('broken.zip：压缩包已损坏'), findsOneWidget);
@@ -108,7 +114,7 @@ void main() {
   });
 
   testWidgets(
-    'explicit extract-to opens the archive even in direct extraction mode',
+    'explicit extract-to selects a directory without opening the main page',
     (tester) async {
       messenger.setMockMethodCallHandler(
         channel,
@@ -126,16 +132,25 @@ void main() {
       await tester.pumpWidget(
         JucierApp(
           engine: engine,
+          desktopWindowService: FakeDesktopWindowService(),
+          selectExternalExtractionDirectory: () async => '/tmp/selected-output',
           fileAccessService: _GrantedFileAccessService(),
           finderActionService: service,
         ),
       );
       await tester.pumpAndSettle();
-      await service.dispatch();
+      unawaited(service.dispatch());
       await tester.pumpAndSettle();
-      expect(engine.extractions, isEmpty);
+      expect(engine.extractions.single.outputDirectory, '/tmp/selected-output');
       expect(engine.listCalls, ['/tmp/example.zip']);
-      expect(find.byKey(const ValueKey('archive-page')), findsOneWidget);
+      expect(find.byKey(const ValueKey('archive-page')), findsNothing);
+      expect(find.byKey(const ValueKey('home-page')), findsNothing);
+      expect(
+        find.byKey(const ValueKey('external-operation-window')),
+        findsOneWidget,
+      );
+      await tester.tap(find.text('好'));
+      await tester.pumpAndSettle();
     },
   );
 
@@ -163,12 +178,18 @@ void main() {
     await tester.pumpWidget(
       JucierApp(
         engine: engine,
+        desktopWindowService: FakeDesktopWindowService(),
         fileAccessService: _GrantedFileAccessService(),
         finderActionService: service,
       ),
     );
-    await tester.runAsync(service.dispatch);
+    await tester.runAsync(() async {
+      unawaited(service.dispatch());
+    });
     for (var attempt = 0; attempt < 20 && engine.creations.isEmpty; attempt++) {
+      await tester.runAsync(
+        () async => Future<void>.delayed(const Duration(milliseconds: 10)),
+      );
       await tester.pump(const Duration(milliseconds: 50));
     }
     await tester.pump(const Duration(milliseconds: 400));
@@ -182,7 +203,98 @@ void main() {
     expect(engine.creations.single.format, ArchiveFormat.zip);
     expect(engine.listCalls, isEmpty);
     expect(find.text('压缩完成'), findsOneWidget);
+    await tester.tap(find.text('好'));
+    await tester.pumpAndSettle();
   });
+
+  for (final cancel in [false, true]) {
+    testWidgets(
+      'external custom compression ${cancel ? 'cancels' : 'creates'} without the main page',
+      (tester) async {
+        late Directory directory;
+        late File source;
+        await tester.runAsync(() async {
+          directory = await Directory.systemTemp.createTemp(
+            'jucier-custom-test-',
+          );
+          source = await File(p.join(directory.path, 'notes.txt'))
+              .writeAsString('hello');
+        });
+        addTearDown(() => directory.deleteSync(recursive: true));
+        await tester.binding.setSurfaceSize(const Size(560, 660));
+        addTearDown(() => tester.binding.setSurfaceSize(null));
+        final engine = _FinderActionArchiveEngine();
+        final windows = FakeDesktopWindowService();
+        final service = _FakeFinderActionService(
+          FinderActionRequest(
+            type: FinderActionType.compress,
+            paths: [source.path],
+          ),
+        );
+        await tester.pumpWidget(
+          JucierApp(
+            engine: engine,
+            desktopWindowService: windows,
+            finderActionService: service,
+            archiveOpenService: _NoopArchiveOpenService(),
+            fileAccessService: _GrantedFileAccessService(),
+          ),
+        );
+        unawaited(service.dispatch());
+        for (
+          var attempt = 0;
+          attempt < 20 && windows.configurations.isEmpty;
+          attempt++
+        ) {
+          await tester.runAsync(
+            () async => Future<void>.delayed(const Duration(milliseconds: 10)),
+          );
+          await tester.pump(const Duration(milliseconds: 50));
+        }
+        await tester.pumpAndSettle();
+        expect(find.byKey(const ValueKey('home-page')), findsNothing);
+        expect(
+          find.byKey(const ValueKey('archive-compose-page')),
+          findsNothing,
+        );
+        expect(find.text('创建压缩包'), findsOneWidget);
+        final path = find.byKey(const ValueKey('save-location-field'));
+        final button = find.byKey(const ValueKey('save-location-button'));
+        final input = find.descendant(
+          of: path,
+          matching: find.byType(InputDecorator),
+        );
+        expect(tester.getRect(input).top, tester.getRect(button).top);
+        expect(tester.getRect(input).bottom, tester.getRect(button).bottom);
+        final submit = cancel ? find.text('取消').last : find.text('创建');
+        await tester.ensureVisible(submit);
+        await tester.tap(submit);
+        for (
+          var attempt = 0;
+          attempt < 20 &&
+              find.text(cancel ? '压缩已取消' : '压缩完成').evaluate().isEmpty;
+          attempt++
+        ) {
+          await tester.runAsync(
+            () async => Future<void>.delayed(const Duration(milliseconds: 10)),
+          );
+          await tester.pump(const Duration(milliseconds: 50));
+        }
+        await tester.binding.setSurfaceSize(const Size(560, 360));
+        await tester.pumpAndSettle();
+        expect(windows.configurations, [true, false]);
+        expect(engine.creations, cancel ? isEmpty : hasLength(1));
+        expect(find.text(cancel ? '压缩已取消' : '压缩完成'), findsOneWidget);
+        expect(tester.takeException(), isNull);
+        await tester.tap(find.text('好'));
+        await tester.pumpAndSettle();
+      },
+      variant: TargetPlatformVariant({
+        TargetPlatform.macOS,
+        TargetPlatform.windows,
+      }),
+    );
+  }
 }
 
 class _FakeFinderActionService implements FinderActionService {

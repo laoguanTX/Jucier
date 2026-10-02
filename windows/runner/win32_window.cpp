@@ -30,9 +30,10 @@ LRESULT FrameHitTest(HWND window, LPARAM position) {
   RECT client{};
   GetClientRect(window, &client);
   const UINT dpi = GetDpiForWindow(window);
+  const bool compact = GetPropW(window, L"JucierCompactOperation") != nullptr;
   const int border = GetSystemMetricsForDpi(SM_CXSIZEFRAME, dpi) +
                      GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi);
-  if (!IsZoomed(window)) {
+  if (!compact && !IsZoomed(window)) {
     const bool left = point.x < border;
     const bool right = point.x >= client.right - border;
     const bool top = point.y < border;
@@ -50,9 +51,9 @@ LRESULT FrameHitTest(HWND window, LPARAM position) {
   const int button_width = MulDiv(kCaptionButtonWidth, dpi, 96);
   if (point.y >= 0 && point.y < title_height) {
     // Native maximize hit testing enables the Windows 11 Snap Layout flyout.
-    if (point.x >= client.right - 2 * button_width &&
+    if (!compact && point.x >= client.right - 2 * button_width &&
         point.x < client.right - button_width) return HTMAXBUTTON;
-    if (point.x < client.right - 3 * button_width) return HTCAPTION;
+    if (point.x < client.right - (compact ? 1 : 3) * button_width) return HTCAPTION;
   }
   return HTCLIENT;
 }

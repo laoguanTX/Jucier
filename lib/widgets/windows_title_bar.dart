@@ -17,6 +17,7 @@ class WindowsTitleBar extends StatefulWidget {
 class _WindowsTitleBarState extends State<WindowsTitleBar> {
   static const _channel = MethodChannel('dev.jucier/window');
   bool _maximized = false;
+  bool _compact = false;
 
   @override
   void initState() {
@@ -24,6 +25,8 @@ class _WindowsTitleBarState extends State<WindowsTitleBar> {
     _channel.setMethodCallHandler((call) async {
       if (call.method == 'windowStateChanged' && mounted) {
         setState(() => _maximized = call.arguments == true);
+      } else if (call.method == 'operationWindowStateChanged' && mounted) {
+        setState(() => _compact = call.arguments == true);
       }
     });
     unawaited(_loadState());
@@ -53,16 +56,18 @@ class _WindowsTitleBarState extends State<WindowsTitleBar> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.end,
         children: [
-          _CaptionButton(
-            label: '最小化',
-            icon: FLucideIcons.minus,
-            method: 'minimize',
-          ),
-          _CaptionButton(
-            label: _maximized ? '还原' : '最大化',
-            icon: _maximized ? FLucideIcons.copy : FLucideIcons.square,
-            method: 'toggleMaximize',
-          ),
+          if (!_compact)
+            _CaptionButton(
+              label: '最小化',
+              icon: FLucideIcons.minus,
+              method: 'minimize',
+            ),
+          if (!_compact)
+            _CaptionButton(
+              label: _maximized ? '还原' : '最大化',
+              icon: _maximized ? FLucideIcons.copy : FLucideIcons.square,
+              method: 'toggleMaximize',
+            ),
           const _CaptionButton(
             label: '关闭',
             icon: FLucideIcons.x,

@@ -31,19 +31,13 @@ bool FlutterWindow::OnCreate() {
       flutter_controller_->engine()->messenger(), GetHandle(), arguments_);
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
-  flutter_controller_->engine()->SetNextFrameCallback([&]() {
-    if (std::find(arguments_.begin(), arguments_.end(), "--shell-server") == arguments_.end()) {
-      this->Show();
-    }
-  });
   if (std::find(arguments_.begin(), arguments_.end(), "--shell-server") != arguments_.end()) {
     // Close an unused COM activation instead of leaving an invisible process.
     SetTimer(GetHandle(), 1, 30000, nullptr);
   }
 
-  // Flutter can complete the first frame before the "show window" callback is
-  // registered. The following call ensures a frame is pending to ensure the
-  // window is shown. It is a no-op if the first frame hasn't completed yet.
+  // Dart selects the main or compact presentation after draining launch
+  // requests. Render while hidden so external actions never flash Home.
   flutter_controller_->ForceRedraw();
 
   return true;

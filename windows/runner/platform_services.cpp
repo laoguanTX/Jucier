@@ -6,6 +6,7 @@
 #include <shellapi.h>
 
 #include <optional>
+#include <algorithm>
 #include <utility>
 
 namespace {
@@ -54,6 +55,26 @@ bool WritePreference(const std::string& name, const Value& value) {
   return status == ERROR_SUCCESS;
 }
 
+void ResizeOperationWindow(HWND window, bool configuration) {
+  const auto dpi = GetDpiForWindow(window);
+  const int width = MulDiv(560, dpi, 96);
+  const int height = MulDiv(configuration ? 660 : 360, dpi, 96);
+  MONITORINFO monitor = {sizeof(MONITORINFO)};
+  GetMonitorInfoW(MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST), &monitor);
+  WINDOWPLACEMENT placement = {sizeof(WINDOWPLACEMENT)};
+  GetWindowPlacement(window, &placement);
+  const int left = monitor.rcWork.left + (monitor.rcWork.right - monitor.rcWork.left - width) / 2;
+  const int top = monitor.rcWork.top + (monitor.rcWork.bottom - monitor.rcWork.top - height) / 2;
+  // WINDOWPLACEMENT uses workspace coordinates. Preserve the monitor's
+  // virtual-screen origin and subtract only the taskbar's workspace offset.
+  const int workspace_x = monitor.rcWork.left - monitor.rcMonitor.left;
+  const int workspace_y = monitor.rcWork.top - monitor.rcMonitor.top;
+  placement.rcNormalPosition = {left - workspace_x, top - workspace_y,
+                               left - workspace_x + width, top - workspace_y + height};
+  placement.showCmd = IsWindowVisible(window) ? SW_SHOWNORMAL : SW_HIDE;
+  SetWindowPlacement(window, &placement);
+}
+
 Value FileAccess() {
   // Windows has no macOS security-scoped bookmark permission prompt. Actual
   // filesystem permissions are checked by each operation, using the OS errors.
@@ -75,14 +96,60 @@ bool OpenFile(HWND window, const std::wstring& path) {
 
 PlatformServices::PlatformServices(flutter::BinaryMessenger* messenger,
     HWND window, const std::vector<std::string>& arguments) : window_(window) {
+  shell_server_ = std::find(arguments.begin(), arguments.end(), "--shell-server") != arguments.end();
   window_channel_ = std::make_unique<flutter::MethodChannel<Value>>(
       messenger, "dev.jucier/window", &flutter::StandardMethodCodec::GetInstance());
-  window_channel_->SetMethodCallHandler([window](const auto& call, auto result) {
+  window_channel_->SetMethodCallHandler([this, window](const auto& call, auto result) {
     const auto& method = call.method_name();
-    if (method == "windowState") {
+    if (method == "prepareOperationWindow") {
+      if (has_presented_main_window_ && IsWindowVisible(window) && !IsIconic(window)) {
+        result->Success(Value(false));
+        return;
+      }
+      GetWindowPlacement(window, &saved_main_placement_);
+      compact_operation_window_ = true;
+      SetPropW(window, L"JucierCompactOperation", reinterpret_cast<HANDLE>(1));
+      window_channel_->InvokeMethod("operationWindowStateChanged", std::make_unique<Value>(true));
+      ShowWindow(window, SW_HIDE);
+      ResizeOperationWindow(window, false);
+      result->Success(Value(true));
+    } else if (method == "showPreparedWindow") {
+      if (compact_operation_window_) {
+        ShowWindow(window, SW_SHOWNORMAL);
+        SetForegroundWindow(window);
+      }
+      result->Success();
+    } else if (method == "configureOperationWindow") {
+      const auto* configuration = call.arguments()
+          ? std::get_if<bool>(call.arguments()) : nullptr;
+      if (compact_operation_window_) ResizeOperationWindow(window, configuration && *configuration);
+      result->Success();
+    } else if (method == "showMainWindow") {
+      const auto* explicit_request = call.arguments()
+          ? std::get_if<bool>(call.arguments()) : nullptr;
+      if (!compact_operation_window_ &&
+          (!shell_server_ || (explicit_request && *explicit_request))) {
+        has_presented_main_window_ = true;
+        ShowWindow(window, IsIconic(window) ? SW_RESTORE : SW_SHOW);
+        SetForegroundWindow(window);
+      }
+      result->Success();
+    } else if (method == "finishOperationWindow") {
+      ShowWindow(window, SW_HIDE);
+      compact_operation_window_ = false;
+      RemovePropW(window, L"JucierCompactOperation");
+      window_channel_->InvokeMethod("operationWindowStateChanged", std::make_unique<Value>(false));
+      // Restore geometry without bringing the hidden workspace forward.
+      const bool minimized = saved_main_placement_.showCmd == SW_SHOWMINIMIZED;
+      saved_main_placement_.showCmd = SW_HIDE;
+      SetWindowPlacement(window, &saved_main_placement_);
+      if (has_presented_main_window_ && minimized) ShowWindow(window, SW_SHOWMINNOACTIVE);
+      result->Success(Value(!has_presented_main_window_));
+    } else if (method == "windowState") {
       result->Success(Value(IsZoomed(window) != FALSE));
     } else if (method == "minimize" || method == "toggleMaximize") {
       result->Success();
+      if (compact_operation_window_) return;
       ShowWindow(window, method == "minimize" ? SW_MINIMIZE :
           (IsZoomed(window) ? SW_RESTORE : SW_MAXIMIZE));
     } else if (method == "close") {
@@ -118,8 +185,6 @@ PlatformServices::PlatformServices(flutter::BinaryMessenger* messenger,
         pending_actions_.emplace_back(Map{{Value("action"), Value(action)},
                                           {Value("paths"), Value(selection)}});
         KillTimer(window_, 1);
-        ShowWindow(window_, IsIconic(window_) ? SW_RESTORE : SW_SHOW);
-        SetForegroundWindow(window_);
         finder_action_->InvokeMethod("finderActionsAvailable", nullptr);
       });
   if (FAILED(shell_status)) {

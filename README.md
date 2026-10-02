@@ -36,6 +36,11 @@ visible in a compact footer.
 - Choose whether double-clicking an archive opens its file list (the default)
   or extracts beside the archive, respecting Smart extraction. Both desktop
   platforms persist the choice and prompt for passwords when needed.
+- Desktop quick actions use a compact progress/result window when the main
+  window is closed, hidden, or minimized. ZIP/custom compression and extraction
+  share the existing engine and cancellation controls. Custom compression asks
+  for options, and extract-to asks for a destination in the same temporary session.
+  A visible main window is reused; a hidden workspace is preserved after the task.
 - System, light, and dark desktop themes with a persistent appearance setting.
 
 ## Requirements

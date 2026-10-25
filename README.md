@@ -41,6 +41,10 @@ visible in a compact footer.
   share the existing engine and cancellation controls. Custom compression asks
   for options, and extract-to asks for a destination in the same temporary session.
   A visible main window is reused; a hidden workspace is preserved after the task.
+  The temporary window fits its content, grows with expanded options, and caps
+  its height to the screen. Completed operations can open their output folders.
+  Completion keeps the progress window's height and fades in the result; longer
+  results expand the window smoothly instead of jumping to a new size.
 - System, light, and dark desktop themes with a persistent appearance setting.
 
 ## Requirements

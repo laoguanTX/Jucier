@@ -2,17 +2,28 @@ import 'package:forui/forui.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../widgets/dialog_form.dart';
+import '../widgets/content_size_reporter.dart';
 
 Future<String?> showPasswordDialog(
   BuildContext context, {
   required String title,
+  ValueChanged<Size>? onSizeChanged,
 }) => showFDialog<String>(
   context: context,
   barrierDismissible: false,
   builder: (context, _, animation) => FDialog(
     animation: animation,
-    constraints: const BoxConstraints(minWidth: 400, maxWidth: 460),
-    builder: (context, style) => _PasswordForm(title: title, style: style),
+    constraints: BoxConstraints(
+      minWidth: 400,
+      maxWidth: 460,
+      maxHeight: MediaQuery.sizeOf(context).height - 48,
+    ),
+    builder: (context, style) => SingleChildScrollView(
+      child: ContentSizeReporter(
+        onSizeChanged: onSizeChanged,
+        child: _PasswordForm(title: title, style: style),
+      ),
+    ),
   ),
 );
 

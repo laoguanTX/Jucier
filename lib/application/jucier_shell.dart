@@ -102,9 +102,11 @@ class JucierShell extends StatefulWidget {
   State<JucierShell> createState() => _JucierShellState();
 }
 
-class _JucierShellState extends State<JucierShell> {
+class _JucierShellState extends State<JucierShell>
+    with SingleTickerProviderStateMixin {
   late final ArchiveWorkflowController _workflow;
   late final FilePreviewService _previews;
+  late final FileLauncher _fileLauncher;
   late final MacOSArchiveDragService _archiveDragService;
   final Map<String, _ArchiveDragPayload> _dragPayloads = {};
   int _nextDragId = 0;
@@ -116,9 +118,16 @@ class _JucierShellState extends State<JucierShell> {
   bool _creatingArchive = false;
   bool _draftLoading = false;
   bool _compactOperation = false;
+  double? _externalContentHeight;
+  double? _requestedExternalHeight;
+  double? _appliedExternalHeight;
+  double? _externalResultMinimumHeight;
+  late final AnimationController _externalWindowHeight;
+  int _externalPromptDepth = 0;
   bool _externalOnlySession = false;
   String _externalOperationTitle = '';
   String? _externalOperationMessage;
+  List<String> _externalOperationDirectories = const [];
   bool _externalOperationFailed = false;
   bool _externalOperationCancelled = false;
   Completer<void>? _externalResultClosed;
@@ -134,13 +143,18 @@ class _JucierShellState extends State<JucierShell> {
   @override
   void initState() {
     super.initState();
+    _externalWindowHeight = AnimationController.unbounded(
+      vsync: this,
+      value: 240,
+    )..addListener(_applyExternalWindowHeight);
     _checkingForExternalArchive = widget.waitForInitialArchiveOpen;
     _workflow = ArchiveWorkflowController(
       widget.engine,
       compressionPerformance: () => widget.compressionPerformance,
     );
+    _fileLauncher = widget.fileLauncher ?? DesktopFileLauncher();
     _previews = FilePreviewService(
-      launcher: widget.fileLauncher ?? DesktopFileLauncher(),
+      launcher: _fileLauncher,
       onChanged: _handlePreviewChanged,
     );
     _archiveDragService = MacOSArchiveDragService(
@@ -157,6 +171,7 @@ class _JucierShellState extends State<JucierShell> {
 
   @override
   void dispose() {
+    _externalWindowHeight.dispose();
     widget.fileAccessService.setOpenSettingsHandler(null);
     widget.archiveOpenService.setHandler(null);
     widget.finderActionService.setHandler(null);
@@ -218,6 +233,12 @@ class _JucierShellState extends State<JucierShell> {
                         progress: _workflow.busy ? progress : 0,
                         message: _externalOperationMessage,
                         failed: _externalOperationFailed,
+                        onSizeChanged: _measureExternalOperation,
+                        onOpenDirectory: _externalOperationDirectories.isEmpty
+                            ? null
+                            : () => _openOutputDirectories(
+                                _externalOperationDirectories,
+                              ),
                         onCancel: _cancelExternalOperation,
                         onClose: () {
                           if (_externalResultClosed?.isCompleted == false) {
@@ -359,10 +380,17 @@ class _JucierShellState extends State<JucierShell> {
       if (!mounted) return;
       _externalOperationCancelled = false;
       if (compact) {
+        _externalWindowHeight.stop();
+        _appliedExternalHeight = 240;
+        _externalWindowHeight.value = 240;
+        _externalContentHeight = null;
+        _requestedExternalHeight = null;
+        _externalResultMinimumHeight = null;
         setState(() {
           _compactOperation = true;
           _externalOperationTitle = title;
           _externalOperationMessage = null;
+          _externalOperationDirectories = const [];
           _externalOperationFailed = false;
         });
         await _prepareWindowFrame();
@@ -379,6 +407,7 @@ class _JucierShellState extends State<JucierShell> {
         );
       } finally {
         if (compact && mounted) {
+          _externalWindowHeight.stop();
           final quit = await widget.desktopWindowService.finishOperation();
           if (quit) {
             _externalOnlySession = true;
@@ -642,6 +671,7 @@ class _JucierShellState extends State<JucierShell> {
     var completed = 0;
     _ArchiveExtractionOutcome? stopped;
     String? completedDirectory;
+    final completedDirectories = <String>[];
     for (final archivePath in archives) {
       if (!mounted) return;
       final outcome = await _extractArchiveBesideSource(
@@ -655,6 +685,13 @@ class _JucierShellState extends State<JucierShell> {
       }
       completed++;
       completedDirectory = outcome.outputDirectory;
+      // For a batch, open the containing folders instead of one Finder window
+      // per smart-extraction subfolder. A single archive opens its actual output.
+      completedDirectories.add(
+        archives.length == 1
+            ? completedDirectory!
+            : outputDirectory ?? p.dirname(archivePath),
+      );
     }
 
     if (!mounted) return;
@@ -664,6 +701,7 @@ class _JucierShellState extends State<JucierShell> {
         title: stopped.cancelled ? '解压已取消' : '解压失败',
         message: '$prefix${p.basename(stopped.archivePath)}：${stopped.error}',
         failed: !stopped.cancelled,
+        directories: completedDirectories,
       );
       return;
     }
@@ -675,6 +713,7 @@ class _JucierShellState extends State<JucierShell> {
           : outputDirectory == null
           ? '$completed 个压缩包已解压到各自所在位置。'
           : '$completed 个压缩包已保存到 $outputDirectory。',
+      directories: completedDirectories,
     );
   }
 
@@ -682,20 +721,118 @@ class _JucierShellState extends State<JucierShell> {
     required String title,
     required String message,
     bool failed = false,
+    Iterable<String> directories = const [],
   }) async {
     if (!mounted) return;
+    final outputDirectories = directories.toSet().toList(growable: false);
     if (_compactOperation) {
+      _externalResultMinimumHeight =
+          _externalContentHeight ?? _requestedExternalHeight ?? 240;
       final closed = Completer<void>();
       _externalResultClosed = closed;
       setState(() {
         _externalOperationTitle = title;
         _externalOperationMessage = message;
         _externalOperationFailed = failed;
+        _externalOperationDirectories = outputDirectories;
       });
       await closed.future;
       _externalResultClosed = null;
     } else {
-      await showMessageDialog(context, title: title, message: message);
+      await showMessageDialog(
+        context,
+        title: title,
+        message: message,
+        onOpenDirectory: outputDirectories.isEmpty
+            ? null
+            : () => _openOutputDirectories(outputDirectories),
+      );
+    }
+  }
+
+  Future<void> _openOutputDirectories(List<String> directories) async {
+    try {
+      for (final directory in directories) {
+        await _fileLauncher.open(directory);
+      }
+    } on ArchiveException catch (error) {
+      if (!mounted) return;
+      await _withExternalOperationPrompt(
+        (onSizeChanged) => showMessageDialog(
+          context,
+          title: '无法打开所在文件夹',
+          message: error.message,
+          onSizeChanged: onSizeChanged,
+        ),
+      );
+    }
+  }
+
+  double get _externalWindowChrome => _isMacOS
+      ? _macOSTrafficLightInset
+      : defaultTargetPlatform == TargetPlatform.windows
+      ? 32
+      : 0;
+
+  void _applyExternalWindowHeight() {
+    if (!mounted || !_compactOperation) return;
+    final height = _externalWindowHeight.value.ceilToDouble();
+    if (_appliedExternalHeight == height) return;
+    _appliedExternalHeight = height;
+    unawaited(widget.desktopWindowService.resizeOperationWindow(height));
+  }
+
+  void _resizeExternalWindow(double height, {bool animate = false}) {
+    if (!mounted || !_compactOperation) return;
+    final requested = height.ceilToDouble();
+    if (_requestedExternalHeight == requested) return;
+    _requestedExternalHeight = requested;
+    if (animate && !MediaQuery.disableAnimationsOf(context)) {
+      unawaited(
+        _externalWindowHeight.animateTo(
+          requested,
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeInOutCubic,
+        ),
+      );
+    } else {
+      _externalWindowHeight.stop();
+      _externalWindowHeight.value = requested;
+    }
+  }
+
+  void _measureExternalOperation(Size size) {
+    final measured = size.height + _externalWindowChrome;
+    final minimum = _externalResultMinimumHeight ?? 0;
+    _externalContentHeight = measured < minimum ? minimum : measured;
+    if (_externalPromptDepth == 0) {
+      _resizeExternalWindow(
+        _externalContentHeight!,
+        animate:
+            _externalOperationMessage != null &&
+            _externalContentHeight! > _externalWindowHeight.value,
+      );
+    }
+  }
+
+  Future<T> _withExternalOperationPrompt<T>(
+    Future<T> Function(ValueChanged<Size>? onSizeChanged) showPrompt,
+  ) async {
+    if (!_compactOperation) return showPrompt(null);
+    _externalPromptDepth++;
+    var active = true;
+    try {
+      return await showPrompt((size) {
+        if (active) {
+          _resizeExternalWindow(size.height + 48 + _externalWindowChrome);
+        }
+      });
+    } finally {
+      active = false;
+      _externalPromptDepth--;
+      if (_externalPromptDepth == 0 && _externalContentHeight != null) {
+        _resizeExternalWindow(_externalContentHeight!);
+      }
     }
   }
 
@@ -725,9 +862,12 @@ class _JucierShellState extends State<JucierShell> {
       if (!mounted) {
         return _ArchiveExtractionOutcome.failed(archivePath, '应用已关闭。');
       }
-      final entered = await showPasswordDialog(
-        context,
-        title: '输入 ${p.basename(archivePath)} 的密码',
+      final entered = await _withExternalOperationPrompt(
+        (onSizeChanged) => showPasswordDialog(
+          context,
+          title: '输入 ${p.basename(archivePath)} 的密码',
+          onSizeChanged: onSizeChanged,
+        ),
       );
       if (entered == null || !mounted) {
         return _ArchiveExtractionOutcome.cancelled(archivePath);
@@ -766,15 +906,14 @@ class _JucierShellState extends State<JucierShell> {
   Future<void> _configureExternalArchive(List<String> paths) async {
     final sources = await _existingSources(paths);
     if (!mounted || sources.isEmpty) return;
-    if (_compactOperation) {
-      await widget.desktopWindowService.configureOperationWindow(true);
-    }
+    final options = await _withExternalOperationPrompt(
+      (onSizeChanged) => showCreateArchiveDialog(
+        context,
+        sources: sources,
+        onSizeChanged: onSizeChanged,
+      ),
+    );
     if (!mounted) return;
-    final options = await showCreateArchiveDialog(context, sources: sources);
-    if (!mounted) return;
-    if (_compactOperation) {
-      await widget.desktopWindowService.configureOperationWindow(false);
-    }
     if (options == null) {
       await _showExternalOperationResult(title: '压缩已取消', message: '操作已取消。');
       return;
@@ -807,6 +946,7 @@ class _JucierShellState extends State<JucierShell> {
       await _showExternalOperationResult(
         title: '压缩完成',
         message: '压缩包已保存到 ${options.archivePath}',
+        directories: [p.dirname(options.archivePath)],
       );
     } on ArchiveCancelledException {
       await _showExternalOperationResult(title: '压缩已取消', message: '操作已取消。');
@@ -825,12 +965,15 @@ class _JucierShellState extends State<JucierShell> {
       return true;
     }
     if (!mounted) return false;
-    return showConfirmationDialog(
-      context,
-      title: '替换已有压缩包？',
-      message: '新压缩包将替换 ${p.basename(options.archivePath)}，旧包中的其他文件不会保留。',
-      confirmLabel: '替换',
-      destructive: true,
+    return _withExternalOperationPrompt(
+      (onSizeChanged) => showConfirmationDialog(
+        context,
+        title: '替换已有压缩包？',
+        message: '新压缩包将替换 ${p.basename(options.archivePath)}，旧包中的其他文件不会保留。',
+        confirmLabel: '替换',
+        destructive: true,
+        onSizeChanged: onSizeChanged,
+      ),
     );
   }
 

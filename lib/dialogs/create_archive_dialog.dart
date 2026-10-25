@@ -5,6 +5,7 @@ import 'package:path/path.dart' as p;
 
 import '../archive/archive_options.dart';
 import '../widgets/dialog_form.dart';
+import '../widgets/content_size_reporter.dart';
 
 enum SourcePickerChoice { files, folder }
 
@@ -59,6 +60,7 @@ Future<SourcePickerChoice?> showSourcePicker(
 Future<CreateArchiveOptions?> showCreateArchiveDialog(
   BuildContext context, {
   required List<String> sources,
+  ValueChanged<Size>? onSizeChanged,
 }) => showFDialog<CreateArchiveOptions>(
   context: context,
   barrierDismissible: false,
@@ -72,7 +74,10 @@ Future<CreateArchiveOptions?> showCreateArchiveDialog(
         maxHeight: availableHeight,
       ),
       builder: (context, style) => SingleChildScrollView(
-        child: _CreateArchiveForm(style: style, sources: sources),
+        child: ContentSizeReporter(
+          onSizeChanged: onSizeChanged,
+          child: _CreateArchiveForm(style: style, sources: sources),
+        ),
       ),
     );
   },

@@ -4,7 +4,9 @@ abstract interface class DesktopWindowService {
   /// Returns true when the main window is hidden and a compact window is used.
   Future<bool> prepareOperation();
   Future<void> showPreparedWindow();
-  Future<void> configureOperationWindow(bool configuration);
+
+  /// Fits the compact window to Flutter content; native code caps screen height.
+  Future<void> resizeOperationWindow(double height);
   Future<void> showMainWindow({bool explicit = true});
 
   /// Restores main-window geometry; returns true for a cold launch.
@@ -34,8 +36,8 @@ class NativeDesktopWindowService implements DesktopWindowService {
   Future<void> showPreparedWindow() => _invoke<void>('showPreparedWindow');
 
   @override
-  Future<void> configureOperationWindow(bool configuration) =>
-      _invoke<void>('configureOperationWindow', configuration);
+  Future<void> resizeOperationWindow(double height) =>
+      _invoke<void>('resizeOperationWindow', height);
 
   @override
   Future<void> showMainWindow({bool explicit = true}) =>

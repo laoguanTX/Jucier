@@ -129,10 +129,11 @@ void main() {
       (tester) async {
         final engine = _ExtractionArchiveEngine(requiredPassword: 'secret');
         final openService = _FakeArchiveOpenService('/tmp/from-finder.zip');
+        final windows = FakeDesktopWindowService();
         await tester.pumpWidget(
           JucierApp(
             engine: engine,
-            desktopWindowService: FakeDesktopWindowService(),
+            desktopWindowService: windows,
             fileAccessService: _GrantedFileAccessService(),
             archiveOpenService: openService,
             archiveOpenPreferenceStore: _FixedArchiveOpenPreferenceStore(
@@ -142,6 +143,8 @@ void main() {
         );
         await tester.pumpAndSettle();
         expect(find.text('输入 from-finder.zip 的密码'), findsOneWidget);
+        final promptHeight = windows.operationHeights.last;
+        expect(promptHeight, greaterThan(windows.operationHeights.first));
         expect(engine.extractions, isEmpty);
         if (cancelPassword) {
           await tester.tap(find.text('取消').last);
@@ -150,6 +153,7 @@ void main() {
           await tester.tap(find.text('继续'));
         }
         await tester.pumpAndSettle();
+        expect(windows.operationHeights.last, lessThan(promptHeight));
         if (cancelPassword) {
           expect(engine.extractions, isEmpty);
           expect(find.text('解压已取消'), findsOneWidget);
@@ -247,8 +251,12 @@ void main() {
       engine.reportProgress!(0.42);
       await tester.pump();
       expect(find.text('42%'), findsOneWidget);
+      final progressHeight = windows.operationHeights.last;
+      final resizeCount = windows.operationHeights.length;
       extraction.complete();
       await tester.pumpAndSettle();
+      expect(windows.operationHeights.last, progressHeight);
+      expect(windows.operationHeights.length, resizeCount);
       expect(find.text('解压完成'), findsOneWidget);
       expect(find.byType(OperationProgress), findsNothing);
       expect(windows.finishCalls, 0);
@@ -258,6 +266,76 @@ void main() {
       expect(openService.quitCalls, 1);
       expect(windows.mainShows, 0);
     },
+    variant: TargetPlatformVariant({
+      TargetPlatform.macOS,
+      TargetPlatform.windows,
+    }),
+  );
+
+  testWidgets(
+    'long extraction results grow gradually without shrinking the progress window',
+    (tester) async {
+      final extraction = Completer<void>();
+      final engine = _ExtractionArchiveEngine(extraction: extraction);
+      final windows = FakeDesktopWindowService();
+      final directory = '/tmp/${List.filled(60, '很长的输出文件夹名称').join('/')}';
+      final openService = _FakeArchiveOpenService('$directory/example.zip');
+      await tester.pumpWidget(
+        JucierApp(
+          engine: engine,
+          desktopWindowService: windows,
+          fileAccessService: _GrantedFileAccessService(),
+          archiveOpenService: openService,
+          archiveOpenPreferenceStore: _FixedArchiveOpenPreferenceStore(
+            Future.value(ArchiveOpenMode.extract),
+          ),
+          waitForInitialArchiveOpen: true,
+        ),
+      );
+      await tester.pumpAndSettle();
+      final progressHeight = windows.operationHeights.last;
+      final resizeCount = windows.operationHeights.length;
+      extraction.complete();
+      for (
+        var attempt = 0;
+        attempt < 10 &&
+            find
+                .byKey(const ValueKey('external-operation-result'))
+                .evaluate()
+                .isEmpty;
+        attempt++
+      ) {
+        await tester.pump();
+      }
+      expect(
+        find.byKey(const ValueKey('external-operation-result')),
+        findsOneWidget,
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+      final earlyHeight = windows.operationHeights.last;
+      await tester.pump(const Duration(milliseconds: 75));
+      final middleHeight = windows.operationHeights.last;
+      await tester.pumpAndSettle();
+      final finalHeight = windows.operationHeights.last;
+      expect(earlyHeight, greaterThan(progressHeight));
+      expect(middleHeight, greaterThan(earlyHeight));
+      expect(finalHeight, greaterThan(middleHeight));
+      final changes = windows.operationHeights.skip(resizeCount).toList();
+      for (var index = 1; index < changes.length; index++) {
+        expect(changes[index], greaterThanOrEqualTo(changes[index - 1]));
+      }
+      expect(find.text('解压完成'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await tester.tap(find.text('好'));
+      await tester.pumpAndSettle();
+      expect(windows.finishCalls, 1);
+      expect(openService.quitCalls, 1);
+    },
+    variant: TargetPlatformVariant({
+      TargetPlatform.macOS,
+      TargetPlatform.windows,
+    }),
   );
 
   for (final compact in [false, true]) {

@@ -12,7 +12,7 @@ class FakeDesktopWindowService implements DesktopWindowService {
   int operationShows = 0;
   int mainShows = 0;
   int finishCalls = 0;
-  final configurations = <bool>[];
+  final operationHeights = <double>[];
 
   @override
   Future<bool> prepareOperation() async {
@@ -24,8 +24,8 @@ class FakeDesktopWindowService implements DesktopWindowService {
   Future<void> showPreparedWindow() async => operationShows++;
 
   @override
-  Future<void> configureOperationWindow(bool configuration) async {
-    configurations.add(configuration);
+  Future<void> resizeOperationWindow(double height) async {
+    operationHeights.add(height);
   }
 
   @override

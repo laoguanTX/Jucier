@@ -176,9 +176,9 @@ class MainFlutterWindow: NSWindow {
         self.savedMainHidden = NSApp.isHidden
         self.compactOperationWindow = true
         self.orderOut(nil)
-        self.minSize = NSSize(width: 560, height: 360)
+        self.minSize = NSSize(width: 560, height: 180)
         self.styleMask.remove([.resizable, .miniaturizable])
-        self.setContentSize(NSSize(width: 560, height: 360))
+        self.setContentSize(NSSize(width: 560, height: 240))
         self.center()
         result(true)
       case "showPreparedWindow":
@@ -189,9 +189,18 @@ class MainFlutterWindow: NSWindow {
           NSApp.activate(ignoringOtherApps: true)
         }
         result(nil)
-      case "configureOperationWindow":
-        if self.compactOperationWindow {
-          self.setContentSize(NSSize(width: 560, height: call.arguments as? Bool == true ? 660 : 360))
+      case "resizeOperationWindow":
+        if self.compactOperationWindow, let requested = call.arguments as? Double,
+          requested.isFinite {
+          let visible = (self.screen ?? NSScreen.main)?.visibleFrame
+            ?? NSRect(x: 0, y: 0, width: 1024, height: 768)
+          let height = min(max(180, ceil(requested)), visible.height - 24)
+          let previousTop = self.frame.maxY
+          self.setContentSize(NSSize(width: 560, height: height))
+          var frame = self.frame
+          frame.origin.y = min(max(visible.minY, previousTop - frame.height),
+                               visible.maxY - frame.height)
+          self.setFrame(frame, display: true)
         }
         result(nil)
       case "showMainWindow":

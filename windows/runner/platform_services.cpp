@@ -8,6 +8,7 @@
 #include <optional>
 #include <algorithm>
 #include <utility>
+#include <cmath>
 
 namespace {
 using Value = flutter::EncodableValue;
@@ -55,16 +56,28 @@ bool WritePreference(const std::string& name, const Value& value) {
   return status == ERROR_SUCCESS;
 }
 
-void ResizeOperationWindow(HWND window, bool configuration) {
+void ResizeOperationWindow(HWND window, double content_height, bool center = false) {
   const auto dpi = GetDpiForWindow(window);
   const int width = MulDiv(560, dpi, 96);
-  const int height = MulDiv(configuration ? 660 : 360, dpi, 96);
   MONITORINFO monitor = {sizeof(MONITORINFO)};
   GetMonitorInfoW(MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST), &monitor);
+  RECT frame = {}, client = {};
+  GetWindowRect(window, &frame);
+  GetClientRect(window, &client);
+  const int chrome = (frame.bottom - frame.top) - (client.bottom - client.top);
+  const int available_height = static_cast<int>(monitor.rcWork.bottom - monitor.rcWork.top)
+      - MulDiv(24, dpi, 96);
+  const int height = std::min(
+      MulDiv(static_cast<int>(std::ceil(std::max(180.0, content_height))), dpi, 96) + chrome,
+      available_height);
   WINDOWPLACEMENT placement = {sizeof(WINDOWPLACEMENT)};
   GetWindowPlacement(window, &placement);
-  const int left = monitor.rcWork.left + (monitor.rcWork.right - monitor.rcWork.left - width) / 2;
-  const int top = monitor.rcWork.top + (monitor.rcWork.bottom - monitor.rcWork.top - height) / 2;
+  const int left = center
+      ? monitor.rcWork.left + (monitor.rcWork.right - monitor.rcWork.left - width) / 2
+      : std::clamp(frame.left, monitor.rcWork.left, monitor.rcWork.right - width);
+  const int top = center
+      ? monitor.rcWork.top + (monitor.rcWork.bottom - monitor.rcWork.top - height) / 2
+      : std::clamp(frame.top, monitor.rcWork.top, monitor.rcWork.bottom - height);
   // WINDOWPLACEMENT uses workspace coordinates. Preserve the monitor's
   // virtual-screen origin and subtract only the taskbar's workspace offset.
   const int workspace_x = monitor.rcWork.left - monitor.rcMonitor.left;
@@ -111,7 +124,7 @@ PlatformServices::PlatformServices(flutter::BinaryMessenger* messenger,
       SetPropW(window, L"JucierCompactOperation", reinterpret_cast<HANDLE>(1));
       window_channel_->InvokeMethod("operationWindowStateChanged", std::make_unique<Value>(true));
       ShowWindow(window, SW_HIDE);
-      ResizeOperationWindow(window, false);
+      ResizeOperationWindow(window, 240, true);
       result->Success(Value(true));
     } else if (method == "showPreparedWindow") {
       if (compact_operation_window_) {
@@ -119,10 +132,12 @@ PlatformServices::PlatformServices(flutter::BinaryMessenger* messenger,
         SetForegroundWindow(window);
       }
       result->Success();
-    } else if (method == "configureOperationWindow") {
-      const auto* configuration = call.arguments()
-          ? std::get_if<bool>(call.arguments()) : nullptr;
-      if (compact_operation_window_) ResizeOperationWindow(window, configuration && *configuration);
+    } else if (method == "resizeOperationWindow") {
+      const auto* height = call.arguments()
+          ? std::get_if<double>(call.arguments()) : nullptr;
+      if (compact_operation_window_ && height && std::isfinite(*height)) {
+        ResizeOperationWindow(window, *height);
+      }
       result->Success();
     } else if (method == "showMainWindow") {
       const auto* explicit_request = call.arguments()

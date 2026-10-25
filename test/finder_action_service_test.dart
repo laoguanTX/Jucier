@@ -38,6 +38,13 @@ void main() {
   testWidgets('Finder 解压 sends an archive to its current directory', (
     tester,
   ) async {
+    final openedDirectories = <String>[];
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      if (call.method == 'openFile') {
+        openedDirectories.add(call.arguments as String);
+      }
+      return null;
+    });
     final engine = _FinderActionArchiveEngine();
     final openService = _NoopArchiveOpenService();
     final service = _FakeFinderActionService(
@@ -66,11 +73,22 @@ void main() {
     }
     await tester.pump(const Duration(milliseconds: 400));
 
+    await tester.binding.setSurfaceSize(const Size(560, 240));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpAndSettle();
+
     expect(engine.extractions, hasLength(1));
     expect(engine.extractions.single.archivePath, '/tmp/example.zip');
     expect(engine.extractions.single.outputDirectory, '/tmp');
     expect(find.text('解压完成'), findsOneWidget);
     expect(openService.quitCalls, 0);
+
+    await tester.tap(find.text('打开所在文件夹'));
+    await tester.pumpAndSettle();
+    expect(openedDirectories, ['/tmp']);
+    expect(find.text('解压完成'), findsOneWidget);
+    expect(openService.quitCalls, 0);
+    expect(tester.takeException(), isNull);
 
     await tester.tap(find.text('好'));
     await tester.pumpAndSettle();
@@ -106,6 +124,7 @@ void main() {
 
     expect(find.text('解压失败'), findsOneWidget);
     expect(find.textContaining('broken.zip：压缩包已损坏'), findsOneWidget);
+    expect(find.text('打开所在文件夹'), findsNothing);
     expect(openService.quitCalls, 0);
 
     await tester.tap(find.text('好'));
@@ -116,12 +135,15 @@ void main() {
   testWidgets(
     'explicit extract-to selects a directory without opening the main page',
     (tester) async {
-      messenger.setMockMethodCallHandler(
-        channel,
-        (call) async => call.method == 'archiveOpenMode'
+      final openedDirectories = <String>[];
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        if (call.method == 'openFile') {
+          openedDirectories.add(call.arguments as String);
+        }
+        return call.method == 'archiveOpenMode'
             ? ArchiveOpenMode.extract.name
-            : null,
-      );
+            : null;
+      });
       final engine = _FinderActionArchiveEngine();
       final service = _FakeFinderActionService(
         const FinderActionRequest(
@@ -149,6 +171,9 @@ void main() {
         find.byKey(const ValueKey('external-operation-window')),
         findsOneWidget,
       );
+      await tester.tap(find.text('打开所在文件夹'));
+      await tester.pumpAndSettle();
+      expect(openedDirectories, ['/tmp/selected-output']);
       await tester.tap(find.text('好'));
       await tester.pumpAndSettle();
     },
@@ -157,6 +182,13 @@ void main() {
   testWidgets('Finder 压缩成 ZIP creates beside the selected source', (
     tester,
   ) async {
+    final openedDirectories = <String>[];
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      if (call.method == 'openFile') {
+        openedDirectories.add(call.arguments as String);
+      }
+      return null;
+    });
     late Directory directory;
     late File source;
     await tester.runAsync(() async {
@@ -203,6 +235,13 @@ void main() {
     expect(engine.creations.single.format, ArchiveFormat.zip);
     expect(engine.listCalls, isEmpty);
     expect(find.text('压缩完成'), findsOneWidget);
+    await tester.binding.setSurfaceSize(const Size(560, 240));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('打开所在文件夹'));
+    await tester.pumpAndSettle();
+    expect(openedDirectories, [directory.path]);
+    expect(tester.takeException(), isNull);
     await tester.tap(find.text('好'));
     await tester.pumpAndSettle();
   });
@@ -243,7 +282,11 @@ void main() {
         unawaited(service.dispatch());
         for (
           var attempt = 0;
-          attempt < 20 && windows.configurations.isEmpty;
+          attempt < 20 &&
+              find
+                  .byKey(const ValueKey('save-location-field'))
+                  .evaluate()
+                  .isEmpty;
           attempt++
         ) {
           await tester.runAsync(
@@ -280,11 +323,13 @@ void main() {
           );
           await tester.pump(const Duration(milliseconds: 50));
         }
-        await tester.binding.setSurfaceSize(const Size(560, 360));
+        await tester.binding.setSurfaceSize(const Size(560, 240));
         await tester.pumpAndSettle();
-        expect(windows.configurations, [true, false]);
+        expect(windows.operationHeights, contains(greaterThan(400)));
+        expect(windows.operationHeights.last, lessThan(300));
         expect(engine.creations, cancel ? isEmpty : hasLength(1));
         expect(find.text(cancel ? '压缩已取消' : '压缩完成'), findsOneWidget);
+        expect(find.text('打开所在文件夹'), cancel ? findsNothing : findsOneWidget);
         expect(tester.takeException(), isNull);
         await tester.tap(find.text('好'));
         await tester.pumpAndSettle();

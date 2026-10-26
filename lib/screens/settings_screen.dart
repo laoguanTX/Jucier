@@ -75,9 +75,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   void initState() {
     super.initState();
-    _loadStatus();
-    _loadAssociationStatus();
-    _loadFinderContextMenuStatus();
+    if (_windows || defaultTargetPlatform == TargetPlatform.macOS) {
+      _loadStatus();
+      _loadAssociationStatus();
+      _loadFinderContextMenuStatus();
+    }
   }
 
   Future<void> _loadStatus() async {
@@ -378,34 +380,37 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         ),
                       ),
                     ),
-                    _SettingsCard(
-                      key: const ValueKey('settings-permission-card'),
-                      icon: FLucideIcons.folderOpen,
-                      iconKey: const ValueKey('settings-permission-icon'),
-                      title: '文件与文件夹访问',
-                      description: windows
-                          ? '使用当前 Windows 用户的文件访问权限。'
-                          : granted
-                          ? '已授权：${status?.directory ?? '已选择的文件夹'}'
-                          : '选择 Jucier 可以打开、创建和解压文件的位置。',
-                      trailing: windows
-                          ? const Text('由系统管理')
-                          : FButton(
-                              key: const ValueKey('settings-permission-action'),
-                              size: FButtonSizeVariant.sm,
-                              variant: granted
-                                  ? FButtonVariant.outline
-                                  : FButtonVariant.primary,
-                              onPress: _requesting ? null : _requestAccess,
-                              child: Text(
-                                _requesting
-                                    ? '等待授权…'
-                                    : granted
-                                    ? '更改…'
-                                    : '授权…',
+                    if (defaultTargetPlatform != TargetPlatform.linux)
+                      _SettingsCard(
+                        key: const ValueKey('settings-permission-card'),
+                        icon: FLucideIcons.folderOpen,
+                        iconKey: const ValueKey('settings-permission-icon'),
+                        title: '文件与文件夹访问',
+                        description: windows
+                            ? '使用当前 Windows 用户的文件访问权限。'
+                            : granted
+                            ? '已授权：${status?.directory ?? '已选择的文件夹'}'
+                            : '选择 Jucier 可以打开、创建和解压文件的位置。',
+                        trailing: windows
+                            ? const Text('由系统管理')
+                            : FButton(
+                                key: const ValueKey(
+                                  'settings-permission-action',
+                                ),
+                                size: FButtonSizeVariant.sm,
+                                variant: granted
+                                    ? FButtonVariant.outline
+                                    : FButtonVariant.primary,
+                                onPress: _requesting ? null : _requestAccess,
+                                child: Text(
+                                  _requesting
+                                      ? '等待授权…'
+                                      : granted
+                                      ? '更改…'
+                                      : '授权…',
+                                ),
                               ),
-                            ),
-                    ),
+                      ),
                   ],
                 ),
               ),

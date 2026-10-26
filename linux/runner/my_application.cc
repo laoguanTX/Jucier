@@ -6,10 +6,13 @@
 #endif
 
 #include "flutter/generated_plugin_registrant.h"
+#include "platform_services.h"
 
 struct _MyApplication {
   GtkApplication parent_instance;
-  char** dart_entrypoint_arguments;
+  FlMethodChannel* archive_open_channel;
+  FlValue* pending_files;
+  PlatformServices* platform_services;
 };
 
 G_DEFINE_TYPE(MyApplication, my_application, GTK_TYPE_APPLICATION)
@@ -22,6 +25,11 @@ static void first_frame_cb(MyApplication* self, FlView* view) {
 // Implements GApplication::activate.
 static void my_application_activate(GApplication* application) {
   MyApplication* self = MY_APPLICATION(application);
+  GList* windows = gtk_application_get_windows(GTK_APPLICATION(application));
+  if (windows) {
+    gtk_window_present(GTK_WINDOW(windows->data));
+    return;
+  }
   GtkWindow* window =
       GTK_WINDOW(gtk_application_window_new(GTK_APPLICATION(application)));
 
@@ -45,18 +53,17 @@ static void my_application_activate(GApplication* application) {
   if (use_header_bar) {
     GtkHeaderBar* header_bar = GTK_HEADER_BAR(gtk_header_bar_new());
     gtk_widget_show(GTK_WIDGET(header_bar));
-    gtk_header_bar_set_title(header_bar, "jucier");
+    gtk_header_bar_set_title(header_bar, "Jucier");
     gtk_header_bar_set_show_close_button(header_bar, TRUE);
     gtk_window_set_titlebar(window, GTK_WIDGET(header_bar));
   } else {
-    gtk_window_set_title(window, "jucier");
+    gtk_window_set_title(window, "Jucier");
   }
 
   gtk_window_set_default_size(window, 1280, 720);
+  gtk_window_set_icon_name(window, APPLICATION_ID);
 
   g_autoptr(FlDartProject) project = fl_dart_project_new();
-  fl_dart_project_set_dart_entrypoint_arguments(
-      project, self->dart_entrypoint_arguments);
 
   FlView* view = fl_view_new(project);
   GdkRGBA background_color;
@@ -75,65 +82,93 @@ static void my_application_activate(GApplication* application) {
 
   fl_register_plugins(FL_PLUGIN_REGISTRY(view));
 
+  FlBinaryMessenger* messenger =
+      fl_engine_get_binary_messenger(fl_view_get_engine(view));
+  self->platform_services = new PlatformServices(messenger, window);
+  g_autoptr(FlStandardMethodCodec) codec = fl_standard_method_codec_new();
+  self->archive_open_channel = fl_method_channel_new(
+      messenger, "dev.jucier/archive_open", FL_METHOD_CODEC(codec));
+  fl_method_channel_set_method_call_handler(
+      self->archive_open_channel,
+      [](FlMethodChannel*, FlMethodCall* call, gpointer data) {
+        MyApplication* app = MY_APPLICATION(data);
+        const gchar* method = fl_method_call_get_name(call);
+        if (g_strcmp0(method, "takePendingOpenFiles") == 0) {
+          fl_method_call_respond_success(call, app->pending_files, nullptr);
+          fl_value_unref(app->pending_files);
+          app->pending_files = fl_value_new_list();
+        } else if (g_strcmp0(method, "quitApplication") == 0) {
+          fl_method_call_respond_success(call, nullptr, nullptr);
+          g_application_quit(G_APPLICATION(app));
+        } else {
+          fl_method_call_respond_not_implemented(call, nullptr);
+        }
+      },
+      self, nullptr);
+
   gtk_widget_grab_focus(GTK_WIDGET(view));
 }
 
-// Implements GApplication::local_command_line.
-static gboolean my_application_local_command_line(GApplication* application,
-                                                  gchar*** arguments,
-                                                  int* exit_status) {
-  MyApplication* self = MY_APPLICATION(application);
-  // Strip out the first argument as it is the binary name.
-  self->dart_entrypoint_arguments = g_strdupv(*arguments + 1);
+// Queue absolute paths before notifying Dart. Both cold and running launches
+// use the same drain, so opening another archive reuses the existing window.
+static void queue_file(MyApplication* self, GFile* file) {
+  g_autofree gchar* path = g_file_get_path(file);
+  if (path) fl_value_append_take(self->pending_files, fl_value_new_string(path));
+}
 
-  g_autoptr(GError) error = nullptr;
-  if (!g_application_register(application, nullptr, &error)) {
-    g_warning("Failed to register: %s", error->message);
-    *exit_status = 1;
-    return TRUE;
+static void notify_files(MyApplication* self) {
+  if (self->archive_open_channel) {
+    fl_method_channel_invoke_method(self->archive_open_channel,
+                                   "archiveFilesAvailable", nullptr, nullptr,
+                                   nullptr, nullptr);
   }
+}
 
+static int my_application_command_line(GApplication* application,
+                                       GApplicationCommandLine* command_line) {
+  MyApplication* self = MY_APPLICATION(application);
+  int count = 0;
+  g_auto(GStrv) args = g_application_command_line_get_arguments(command_line,
+                                                              &count);
+  for (int i = 1; i < count; ++i) {
+    if (g_strcmp0(args[i], "--") == 0) continue;
+    g_autoptr(GFile) file =
+        g_application_command_line_create_file_for_arg(command_line, args[i]);
+    queue_file(self, file);
+  }
   g_application_activate(application);
-  *exit_status = 0;
-
-  return TRUE;
+  notify_files(self);
+  return 0;
 }
 
-// Implements GApplication::startup.
-static void my_application_startup(GApplication* application) {
-  // MyApplication* self = MY_APPLICATION(object);
-
-  // Perform any actions required at application startup.
-
-  G_APPLICATION_CLASS(my_application_parent_class)->startup(application);
-}
-
-// Implements GApplication::shutdown.
-static void my_application_shutdown(GApplication* application) {
-  // MyApplication* self = MY_APPLICATION(object);
-
-  // Perform any actions required at application shutdown.
-
-  G_APPLICATION_CLASS(my_application_parent_class)->shutdown(application);
+static void my_application_open(GApplication* application, GFile** files,
+                                gint count, const gchar*) {
+  MyApplication* self = MY_APPLICATION(application);
+  for (gint i = 0; i < count; ++i) queue_file(self, files[i]);
+  g_application_activate(application);
+  notify_files(self);
 }
 
 // Implements GObject::dispose.
 static void my_application_dispose(GObject* object) {
   MyApplication* self = MY_APPLICATION(object);
-  g_clear_pointer(&self->dart_entrypoint_arguments, g_strfreev);
+  delete self->platform_services;
+  self->platform_services = nullptr;
+  g_clear_object(&self->archive_open_channel);
+  g_clear_pointer(&self->pending_files, fl_value_unref);
   G_OBJECT_CLASS(my_application_parent_class)->dispose(object);
 }
 
 static void my_application_class_init(MyApplicationClass* klass) {
   G_APPLICATION_CLASS(klass)->activate = my_application_activate;
-  G_APPLICATION_CLASS(klass)->local_command_line =
-      my_application_local_command_line;
-  G_APPLICATION_CLASS(klass)->startup = my_application_startup;
-  G_APPLICATION_CLASS(klass)->shutdown = my_application_shutdown;
+  G_APPLICATION_CLASS(klass)->command_line = my_application_command_line;
+  G_APPLICATION_CLASS(klass)->open = my_application_open;
   G_OBJECT_CLASS(klass)->dispose = my_application_dispose;
 }
 
-static void my_application_init(MyApplication* self) {}
+static void my_application_init(MyApplication* self) {
+  self->pending_files = fl_value_new_list();
+}
 
 MyApplication* my_application_new() {
   // Set the program name to the application ID, which helps various systems
@@ -141,8 +176,11 @@ MyApplication* my_application_new() {
   // corresponding .desktop file. This ensures better integration by allowing
   // the application to be recognized beyond its binary name.
   g_set_prgname(APPLICATION_ID);
+  g_set_application_name("Jucier");
 
   return MY_APPLICATION(g_object_new(my_application_get_type(),
                                      "application-id", APPLICATION_ID, "flags",
-                                     G_APPLICATION_NON_UNIQUE, nullptr));
+                                     G_APPLICATION_HANDLES_COMMAND_LINE |
+                                         G_APPLICATION_HANDLES_OPEN,
+                                     nullptr));
 }

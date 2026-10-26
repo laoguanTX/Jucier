@@ -1,5 +1,5 @@
 name: jucier
-description: "A focused, native-feeling archive utility for macOS and Windows."
+description: "A focused archive utility for Linux, macOS, and Windows."
 publish_to: 'none'
 version: 0.1.0+1
 

@@ -14,7 +14,11 @@ List<String> sevenZipExecutableCandidates({
 }) {
   final context = p.Context(style: windows ? p.Style.windows : p.Style.posix);
   final appDirectory = context.dirname(appExecutable);
-  final names = windows ? ['7z.exe', '7zz.exe'] : ['7zz'];
+  final names = windows
+      ? ['7z.exe', '7zz.exe']
+      : macOS
+      ? ['7zz']
+      : ['7zz', '7z'];
   return [
     if (configuredPath?.isNotEmpty == true) configuredPath!,
     if (environment['JUCIER_7ZZ_PATH']?.isNotEmpty == true)
@@ -59,7 +63,9 @@ List<String> sevenZipExecutableCandidates({
         ),
       ),
     ],
-    if (!windows) context.join(currentDirectory, 'assets', 'sevenzip', '7zz'),
+    if (!windows && !macOS)
+      for (final name in names) context.join(appDirectory, 'bin', name),
+    if (macOS) context.join(currentDirectory, 'assets', 'sevenzip', '7zz'),
     for (final directory
         in (environment['PATH'] ?? environment['Path'] ?? '')
             .split(windows ? ';' : ':')
@@ -78,7 +84,10 @@ Future<String?> findSevenZipExecutable({String? configuredPath}) async {
     environment: Platform.environment,
     configuredPath: configuredPath,
   )) {
-    if (await File(candidate).exists()) return p.absolute(candidate);
+    final file = File(candidate);
+    if (!await file.exists()) continue;
+    if (!Platform.isWindows && (await file.stat()).mode & 0x49 == 0) continue;
+    return p.absolute(candidate);
   }
   return null;
 }

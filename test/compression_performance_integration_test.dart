@@ -4,18 +4,12 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:jucier/archive/archive_engine.dart';
 import 'package:jucier/archive/archive_options.dart';
 import 'package:jucier/archive/seven_zip_engine.dart';
+import 'package:jucier/platform/seven_zip_runtime.dart';
 import 'package:path/path.dart' as p;
 
-void main() {
-  final executable = p.absolute(
-    p.joinAll([
-      'assets',
-      'sevenzip',
-      if (Platform.isWindows) 'windows',
-      Platform.isWindows ? '7z.exe' : '7zz',
-    ]),
-  );
-  final skip = !File(executable).existsSync();
+Future<void> main() async {
+  final executable = await findSevenZipExecutable() ?? '';
+  final skip = executable.isEmpty;
   for (final mode in CompressionPerformance.values) {
     for (final format in [ArchiveFormat.sevenZip, ArchiveFormat.zip]) {
       test(

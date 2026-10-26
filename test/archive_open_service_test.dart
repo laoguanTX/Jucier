@@ -66,7 +66,11 @@ void main() {
     expect(find.byKey(const ValueKey('home-page')), findsNothing);
   });
 
-  for (final platform in [TargetPlatform.macOS, TargetPlatform.windows]) {
+  for (final platform in [
+    TargetPlatform.macOS,
+    TargetPlatform.windows,
+    TargetPlatform.linux,
+  ]) {
     for (final smart in [false, true]) {
       testWidgets(
         '${platform.name} cold double-click waits for preferences and extracts (smart: $smart)',

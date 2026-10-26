@@ -8,18 +8,11 @@ import 'package:jucier/archive/seven_zip_engine.dart';
 import 'package:path/path.dart' as p;
 
 void main() {
-  final executable = p.joinAll([
-    Directory.current.path,
-    'assets',
-    'sevenzip',
-    if (Platform.isWindows) 'windows',
-    Platform.isWindows ? '7z.exe' : '7zz',
-  ]);
   late Directory root;
   late SevenZipEngine engine;
   setUp(() async {
     root = await Directory.systemTemp.createTemp('jucier-safety-');
-    engine = SevenZipEngine(executablePath: executable);
+    engine = SevenZipEngine();
   });
   tearDown(() async {
     await engine.cancel();
@@ -181,7 +174,7 @@ void main() {
         'real.txt',
       );
     },
-    skip: !Platform.isMacOS,
+    skip: !(Platform.isMacOS || Platform.isLinux),
   );
 
   test(
@@ -213,7 +206,7 @@ void main() {
         'original',
       );
     },
-    skip: !Platform.isMacOS,
+    skip: !(Platform.isMacOS || Platform.isLinux),
   );
 
   test('batch selected extraction retains both nested files', () async {

@@ -275,7 +275,7 @@ class SevenZipEngine implements ArchiveEngine, ArchiveOperationEvents {
         '-bb0',
         ...exclusions,
       ];
-      if (Platform.isMacOS && options.format.supportsSymbolicLinks) {
+      if (!Platform.isWindows && options.format.supportsSymbolicLinks) {
         args.add('-snl');
       }
       if (options.password case final password? when password.isNotEmpty) {
@@ -540,7 +540,7 @@ class SevenZipEngine implements ArchiveEngine, ArchiveOperationEvents {
         '-bsp1',
         '-bb0',
       ];
-      if (Platform.isMacOS) args.add('-snl');
+      if (!Platform.isWindows) args.add('-snl');
       if (options.password case final password? when password.isNotEmpty) {
         args.add('-p$password');
         if (listing.detectedType == 'zip') {
@@ -642,7 +642,7 @@ class SevenZipEngine implements ArchiveEngine, ArchiveOperationEvents {
         '-bsp1',
         '-bb0',
       ];
-      if (Platform.isMacOS) createArgs.add('-snl');
+      if (!Platform.isWindows) createArgs.add('-snl');
       if (options.password case final password? when password.isNotEmpty) {
         createArgs.add('-p$password');
         if (encryptHeaders) createArgs.add('-mhe=on');
@@ -1381,6 +1381,8 @@ class SevenZipEngine implements ArchiveEngine, ArchiveOperationEvents {
     throw ArchiveException(
       Platform.isWindows
           ? '找不到 7-Zip 引擎。请先运行 tool/prepare_7zip_windows.ps1'
+          : Platform.isLinux
+          ? '找不到 7-Zip 引擎。请安装 7zip（Debian/Ubuntu：sudo apt install 7zip），或设置 JUCIER_7ZZ_PATH。'
           : '找不到 7-Zip 引擎。请先运行 tool/build_7zip_macos.sh',
     );
   }

@@ -5,17 +5,12 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:jucier/archive/archive_engine.dart';
 import 'package:jucier/archive/archive_options.dart';
 import 'package:jucier/archive/seven_zip_engine.dart';
+import 'package:jucier/platform/seven_zip_runtime.dart';
 import 'package:path/path.dart' as p;
 
-void main() {
-  final executable = p.joinAll([
-    Directory.current.path,
-    'assets',
-    'sevenzip',
-    if (Platform.isWindows) 'windows',
-    Platform.isWindows ? '7z.exe' : '7zz',
-  ]);
-  final skip = !File(executable).existsSync();
+Future<void> main() async {
+  final executable = await findSevenZipExecutable() ?? '';
+  final skip = executable.isEmpty;
 
   test(
     'creates, previews, updates, deletes, tests, and extracts entries',
@@ -78,7 +73,7 @@ void main() {
         isNot(contains('hello.txt')),
       );
     },
-    skip: skip ? 'Build assets/sevenzip/7zz first.' : false,
+    skip: skip ? 'Install or prepare the 7-Zip runtime for this platform.' : false,
   );
 
   test(
@@ -204,7 +199,7 @@ void main() {
         throwsA(isA<ArchiveException>()),
       );
     },
-    skip: skip ? 'Build assets/sevenzip/7zz first.' : false,
+    skip: skip ? 'Install or prepare the 7-Zip runtime for this platform.' : false,
   );
 
   test('creates every format exposed by the create menu', () async {
@@ -229,10 +224,10 @@ void main() {
       expect(File(archive).lengthSync(), greaterThan(0), reason: format.label);
       await engine.test(archive);
     }
-  }, skip: skip ? 'Build assets/sevenzip/7zz first.' : false);
+  }, skip: skip ? 'Install or prepare the 7-Zip runtime for this platform.' : false);
 
   test(
-    'keeps ZIP Deflate and preserves macOS symbolic links',
+    'keeps ZIP Deflate and preserves Unix symbolic links',
     () async {
       final temporary = await Directory.systemTemp.createTemp(
         'jucier-macos-links-e2e-',
@@ -280,8 +275,8 @@ void main() {
         await payload.readAsString(),
       );
     },
-    skip: skip || !Platform.isMacOS
-        ? 'Requires the bundled macOS 7-Zip engine.'
+    skip: skip || !(Platform.isMacOS || Platform.isLinux)
+        ? 'Requires a Unix 7-Zip engine.'
         : false,
   );
 
@@ -308,7 +303,7 @@ void main() {
     final addedFolder = Directory(p.join(temporary.path, 'DroppedFolder'));
     await addedFolder.create();
     await File(p.join(addedFolder.path, 'child.txt')).writeAsString('child');
-    if (Platform.isMacOS) {
+    if (Platform.isMacOS || Platform.isLinux) {
       await Link(p.join(addedFolder.path, 'child-link.txt'))
           .create('child.txt');
     }
@@ -326,10 +321,10 @@ void main() {
       containsAll([
         'Current/Inner/added.txt',
         'Current/Inner/DroppedFolder/child.txt',
-        if (Platform.isMacOS) 'Current/Inner/DroppedFolder/child-link.txt',
+        if (Platform.isMacOS || Platform.isLinux) 'Current/Inner/DroppedFolder/child-link.txt',
       ]),
     );
-    if (Platform.isMacOS) {
+    if (Platform.isMacOS || Platform.isLinux) {
       expect(
         listing.entries
             .singleWhere(
@@ -363,13 +358,13 @@ void main() {
       'DroppedFolder',
       'child-link.txt',
     );
-    if (Platform.isMacOS) {
+    if (Platform.isMacOS || Platform.isLinux) {
       expect(
         await FileSystemEntity.type(extractedLink, followLinks: false),
         FileSystemEntityType.link,
       );
     }
-  }, skip: skip ? 'Build assets/sevenzip/7zz first.' : false);
+  }, skip: skip ? 'Install or prepare the 7-Zip runtime for this platform.' : false);
 
   test(
     'case-insensitive staging keeps both dropped files with colliding names',
@@ -466,5 +461,5 @@ void main() {
       reason: 'Repeated additions should not leave one LZMA2 block per file.',
     );
     await engine.test(archive);
-  }, skip: skip ? 'Build assets/sevenzip/7zz first.' : false);
+  }, skip: skip ? 'Install or prepare the 7-Zip runtime for this platform.' : false);
 }

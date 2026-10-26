@@ -979,6 +979,14 @@ class SevenZipEngine implements ArchiveEngine, ArchiveOperationEvents {
     await _checkTargetParents(safeRoot, target);
     await Directory(p.dirname(target)).create(recursive: true);
     if (type == FileSystemEntityType.directory) {
+      if (Platform.isMacOS &&
+          (existing == FileSystemEntityType.notFound || target != requested) &&
+          await _isPlainDirectoryTree(source)) {
+        if (await _copyDirectoryIfAbsent(source, target, safeRoot)) return;
+        // A destination appeared while copying. Reapply the conflict policy
+        // instead of replacing a directory created by another operation.
+        return _copyTree(source, requested, conflict, safeRoot);
+      }
       await Directory(target).create(recursive: true);
       await for (final child in Directory(source).list(followLinks: false)) {
         await _copyTree(
@@ -1017,6 +1025,48 @@ class SevenZipEngine implements ArchiveEngine, ArchiveOperationEvents {
       }
     } else {
       throw const ArchiveException('压缩包包含不支持的特殊文件');
+    }
+  }
+
+  Future<bool> _isPlainDirectoryTree(String source) async {
+    // Links retain the existing per-entry validation after removing parents.
+    // Do not let a recursive native copy bypass those checks.
+    await for (final entity in Directory(
+      source,
+    ).list(recursive: true, followLinks: false)) {
+      _checkCancelled();
+      final type = await FileSystemEntity.type(entity.path, followLinks: false);
+      if (type != FileSystemEntityType.file &&
+          type != FileSystemEntityType.directory) {
+        return false;
+      }
+    }
+    _checkCancelled();
+    return true;
+  }
+
+  Future<bool> _copyDirectoryIfAbsent(
+    String source,
+    String target,
+    String safeRoot,
+  ) async {
+    final temporary = await Directory(p.dirname(target))
+        .createTemp('.jucier-copy-');
+    try {
+      final staged = p.join(temporary.path, 'directory');
+      // One cancellable clone/copy replaces a subprocess and temporary
+      // directory for every file. Keep the source for overlapping selections.
+      await _runCopy(['-ac', source, staged]);
+      _checkCancelled();
+      await _checkTargetParents(safeRoot, target);
+      if (await FileSystemEntity.type(target, followLinks: false) !=
+          FileSystemEntityType.notFound) {
+        return false;
+      }
+      await Directory(staged).rename(target);
+      return true;
+    } finally {
+      await temporary.delete(recursive: true);
     }
   }
 
@@ -1339,6 +1389,8 @@ class SevenZipEngine implements ArchiveEngine, ArchiveOperationEvents {
     String archivePath,
     String output,
   ) {
+    final paths = p.Context(style: p.style, current: p.current);
+    final timestamps = _ListingTimestampParser();
     var current = <String, String>{};
 
     String? type;
@@ -1353,7 +1405,7 @@ class SevenZipEngine implements ArchiveEngine, ArchiveOperationEvents {
       final path = record['Path'];
       if (path == null) return;
 
-      if (p.equals(path, archivePath) || record.containsKey('Type')) {
+      if (record.containsKey('Type') || paths.equals(path, archivePath)) {
         type ??= record['Type'];
         physicalSize ??= int.tryParse(record['Physical Size'] ?? '');
         method ??= record['Method'];
@@ -1373,7 +1425,7 @@ class SevenZipEngine implements ArchiveEngine, ArchiveOperationEvents {
           isDirectory: attributes.startsWith('D') || record['Folder'] == '+',
           size: int.tryParse(record['Size'] ?? ''),
           packedSize: int.tryParse(record['Packed Size'] ?? ''),
-          modified: DateTime.tryParse(record['Modified'] ?? ''),
+          modified: timestamps.parse(record['Modified']),
           crc: record['CRC'],
           method: record['Method'],
           encrypted: record['Encrypted'] == '+',
@@ -1404,5 +1456,39 @@ class SevenZipEngine implements ArchiveEngine, ArchiveOperationEvents {
       solid: solid,
       blocks: blocks,
     );
+  }
+}
+
+class _ListingTimestampParser {
+  static final _localTimestamp = RegExp(
+    r'^(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d)(?:\.(\d{1,9}))?$',
+  );
+  final _seconds = <String, (DateTime?, int)>{};
+
+  DateTime? parse(String? value) {
+    if (value == null || value.isEmpty) return null;
+    final match = _localTimestamp.firstMatch(value);
+    if (match == null) return DateTime.tryParse(value);
+
+    // macOS local-time conversion is expensive. Cache one parsed timestamp per
+    // second and adjust its fraction for nearby entries. Parse cache misses
+    // directly, so unrelated dates do not need two DateTime conversions.
+    final second = match[1]!;
+    final fraction = match[2];
+    // Match DateTime.parse's truncation of precision beyond microseconds.
+    final micros = fraction == null
+        ? 0
+        : int.parse(fraction.padRight(6, '0').substring(0, 6));
+    if (_seconds[second] case final cached?) {
+      final parsed = cached.$1;
+      if (parsed == null) return null;
+      final delta = micros - cached.$2;
+      return delta == 0 ? parsed : parsed.add(Duration(microseconds: delta));
+    }
+    // Bound the per-listing cache for archives with many unrelated dates.
+    if (_seconds.length >= 128) _seconds.clear();
+    final parsed = DateTime.tryParse(value);
+    _seconds[second] = (parsed, micros);
+    return parsed;
   }
 }

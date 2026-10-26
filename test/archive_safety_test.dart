@@ -237,6 +237,185 @@ void main() {
     expect(await File(p.join(out, 'b.txt')).readAsString(), 'b');
   });
 
+  test('selected directory batches copies and retains file metadata', () async {
+    for (var i = 0; i < 128; i++) {
+      await file('Parent/Folder/Sub/file-$i.txt', 'payload-$i');
+    }
+    final executableFile = await file('Parent/Folder/run.sh', '#!/bin/sh\n');
+    final modified = DateTime.utc(2020, 1, 2, 3, 4, 5, 123, 456);
+    await File(executableFile).setLastModified(modified);
+    final chmod = await Process.run('/bin/chmod', ['751', executableFile]);
+    expect(chmod.exitCode, 0);
+    final archive = await create(
+      [p.join(root.path, 'Parent')],
+      name: 'batch.7z',
+      format: ArchiveFormat.sevenZip,
+    );
+    var copies = 0;
+    engine.onPhaseChanged = (phase) {
+      if (phase == '正在复制文件') copies++;
+    };
+    final out = p.join(root.path, 'out');
+    await engine.extractEntries(
+      ExtractEntriesOptions(
+        archivePath: archive,
+        entryPaths: ['Parent/Folder'],
+        selectedEntryPath: 'Parent/Folder',
+        outputDirectory: out,
+        withoutParentDirectories: true,
+      ),
+    );
+    for (var i = 0; i < 128; i++) {
+      expect(
+        await File(p.join(out, 'Folder', 'Sub', 'file-$i.txt')).readAsString(),
+        'payload-$i',
+      );
+    }
+    final extracted = File(p.join(out, 'Folder', 'run.sh'));
+    expect(await extracted.readAsString(), '#!/bin/sh\n');
+    expect((await extracted.stat()).mode & 0x1ff, 0x1e9);
+    expect((await extracted.lastModified()).toUtc(), modified);
+    expect(copies, lessThan(5), reason: 'Do not spawn one copy per file.');
+    expect(await Directory(p.join(out, 'Parent')).exists(), isFalse);
+    expect(
+      (await Directory(
+        out,
+      ).list().toList()).map((entity) => p.basename(entity.path)),
+      ['Folder'],
+    );
+  }, skip: !Platform.isMacOS);
+
+  for (final conflict in ExtractionConflict.values) {
+    test(
+      'selected directory retains ${conflict.name} conflict behavior',
+      () async {
+        await file('Bundle/keep.txt', 'new');
+        await file('Bundle/Sub/new.txt', 'nested');
+        final archive = await create([p.join(root.path, 'Bundle')]);
+        final out = p.join(root.path, 'out');
+        await file('out/Bundle/keep.txt', 'old');
+        await file('out/Bundle/untouched.txt', 'untouched');
+        await engine.extractEntries(
+          ExtractEntriesOptions(
+            archivePath: archive,
+            entryPaths: ['Bundle'],
+            selectedEntryPath: 'Bundle',
+            outputDirectory: out,
+            withoutParentDirectories: true,
+            conflict: conflict,
+          ),
+        );
+        final renamed = conflict == ExtractionConflict.rename;
+        final destination = p.join(out, renamed ? 'Bundle (1)' : 'Bundle');
+        expect(
+          await File(p.join(destination, 'keep.txt')).readAsString(),
+          conflict == ExtractionConflict.skip ? 'old' : 'new',
+        );
+        expect(
+          await File(p.join(destination, 'Sub', 'new.txt')).readAsString(),
+          'nested',
+        );
+        expect(
+          await File(p.join(out, 'Bundle', 'untouched.txt')).readAsString(),
+          'untouched',
+        );
+        if (renamed) {
+          expect(
+            await File(p.join(out, 'Bundle', 'keep.txt')).readAsString(),
+            'old',
+          );
+        }
+      },
+    );
+  }
+
+  test(
+    'overlapping and repeated selections retain their staged sources',
+    () async {
+      await file('Bundle/Sub/data.txt', 'payload');
+      final archive = await create([p.join(root.path, 'Bundle')]);
+      final out = p.join(root.path, 'out');
+      await engine.extractEntries(
+        ExtractEntriesOptions(
+          archivePath: archive,
+          entryPaths: ['Bundle'],
+          selectedEntryPaths: ['Bundle', 'Bundle/Sub', 'Bundle'],
+          outputDirectory: out,
+          withoutParentDirectories: true,
+          conflict: ExtractionConflict.rename,
+        ),
+      );
+      for (final relative in [
+        'Bundle/Sub/data.txt',
+        'Sub/data.txt',
+        'Bundle (1)/Sub/data.txt',
+      ]) {
+        expect(await File(p.join(out, relative)).readAsString(), 'payload');
+      }
+    },
+  );
+
+  test('cancelling a directory copy does not publish partial output', () async {
+    await file('Bundle/Sub/data.txt');
+    final archive = await create([p.join(root.path, 'Bundle')]);
+    final out = p.join(root.path, 'out');
+    engine.onPhaseChanged = (phase) {
+      if (phase == '正在复制文件') unawaited(engine.cancel());
+    };
+    await expectLater(
+      engine.extractEntries(
+        ExtractEntriesOptions(
+          archivePath: archive,
+          entryPaths: ['Bundle'],
+          selectedEntryPath: 'Bundle',
+          outputDirectory: out,
+          withoutParentDirectories: true,
+        ),
+      ),
+      throwsA(isA<ArchiveCancelledException>()),
+    );
+    expect(await Directory(out).list().toList(), isEmpty);
+  }, skip: !Platform.isMacOS);
+
+  test(
+    'a destination appearing during a batch copy follows conflict policy',
+    () async {
+      await file('Bundle/data.txt', 'new');
+      final archive = await create([p.join(root.path, 'Bundle')]);
+      final out = p.join(root.path, 'out');
+      var created = false;
+      engine.onPhaseChanged = (phase) {
+        if (phase == '正在复制文件' && !created) {
+          created = true;
+          final target = File(p.join(out, 'Bundle', 'data.txt'));
+          target.parent.createSync(recursive: true);
+          target.writeAsStringSync('appeared');
+        }
+      };
+      await engine.extractEntries(
+        ExtractEntriesOptions(
+          archivePath: archive,
+          entryPaths: ['Bundle'],
+          selectedEntryPath: 'Bundle',
+          outputDirectory: out,
+          withoutParentDirectories: true,
+          conflict: ExtractionConflict.skip,
+        ),
+      );
+      expect(
+        await File(p.join(out, 'Bundle', 'data.txt')).readAsString(),
+        'appeared',
+      );
+      expect(
+        (await Directory(
+          out,
+        ).list().toList()).map((entity) => p.basename(entity.path)),
+        ['Bundle'],
+      );
+    },
+    skip: !Platform.isMacOS,
+  );
+
   test(
     'ZIP encryption is AES by default and legacy mode is explicit',
     () async {

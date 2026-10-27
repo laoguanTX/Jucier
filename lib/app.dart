@@ -13,7 +13,7 @@ import 'platform/archive_open_preference_store.dart';
 import 'platform/desktop_window_service.dart';
 import 'platform/file_access_service.dart';
 import 'platform/finder_action_service.dart';
-import 'widgets/windows_title_bar.dart';
+import 'widgets/desktop_title_bar.dart';
 import 'platform/archive_column_preference_store.dart';
 import 'platform/single_entry_extraction_preference_store.dart';
 import 'platform/theme_preference_store.dart';
@@ -265,10 +265,12 @@ class _JucierAppState extends State<JucierApp> {
               child: Material(
                 type: MaterialType.transparency,
                 child:
-                    !kIsWeb && defaultTargetPlatform == TargetPlatform.windows
+                    !kIsWeb &&
+                        (defaultTargetPlatform == TargetPlatform.windows ||
+                            defaultTargetPlatform == TargetPlatform.linux)
                     ? Column(
                         children: [
-                          const WindowsTitleBar(),
+                          const DesktopTitleBar(),
                           Expanded(child: child!),
                         ],
                       )

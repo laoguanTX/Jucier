@@ -10,11 +10,9 @@ import 'package:jucier/platform/theme_preference_store.dart';
 import 'package:material_ui/material_ui.dart' show ThemeMode;
 
 void main() {
-  testWidgets('Windows title bar controls dispatch native window actions', (
-    tester,
-  ) async {
-    debugDefaultTargetPlatformOverride = TargetPlatform.windows;
-    try {
+  testWidgets(
+    'desktop title bar controls dispatch native window actions',
+    (tester) async {
       const channel = MethodChannel('dev.jucier/window');
       final calls = <String>[];
       tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, (
@@ -42,8 +40,11 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
+      final platform = defaultTargetPlatform == TargetPlatform.linux
+          ? 'linux'
+          : 'windows';
       expect(
-        tester.getSize(find.byKey(const ValueKey('windows-title-bar'))).height,
+        tester.getSize(find.byKey(ValueKey('$platform-title-bar'))).height,
         32,
       );
       expect(tester.getRect(find.text('Jucier')).top, greaterThanOrEqualTo(32));
@@ -52,10 +53,92 @@ void main() {
         await tester.pump();
       }
       expect(calls, ['windowState', 'minimize', 'toggleMaximize', 'close']);
-    } finally {
-      debugDefaultTargetPlatformOverride = null;
-    }
-  });
+    },
+    variant: TargetPlatformVariant({
+      TargetPlatform.linux,
+      TargetPlatform.windows,
+    }),
+  );
+
+  testWidgets(
+    'desktop title bar follows native maximize and restore changes',
+    (tester) async {
+      const channel = MethodChannel('dev.jucier/window');
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        channel,
+        (call) async => call.method == 'windowState' ? true : null,
+      );
+      addTearDown(
+        () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          channel,
+          null,
+        ),
+      );
+      await tester.pumpWidget(
+        JucierApp(
+          engine: _UnusedArchiveEngine(),
+          themePreferenceStore: _FakeThemePreferenceStore(),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final maximizeButton = find.byKey(
+        const ValueKey('window-toggleMaximize'),
+      );
+      expect(
+        find.descendant(
+          of: maximizeButton,
+          matching: find.byIcon(FLucideIcons.copy),
+        ),
+        findsOneWidget,
+      );
+      tester.binding.channelBuffers.push(
+        channel.name,
+        const StandardMethodCodec().encodeMethodCall(
+          const MethodCall('windowStateChanged', false),
+        ),
+        (_) {},
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.descendant(
+          of: maximizeButton,
+          matching: find.byIcon(FLucideIcons.square),
+        ),
+        findsOneWidget,
+      );
+    },
+    variant: TargetPlatformVariant({
+      TargetPlatform.linux,
+      TargetPlatform.windows,
+    }),
+  );
+
+  for (final mode in [ThemeMode.light, ThemeMode.dark]) {
+    testWidgets('Linux title bar matches the $mode application background', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        JucierApp(
+          engine: _UnusedArchiveEngine(),
+          themePreferenceStore: _FakeThemePreferenceStore(mode),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final titleBar = find.byKey(const ValueKey('linux-title-bar'));
+      final background = tester.widget<ColoredBox>(
+        find.ancestor(of: titleBar, matching: find.byType(ColoredBox)).first,
+      );
+      expect(
+        background.color,
+        mode == ThemeMode.dark
+            ? FColors.neutralDark.background
+            : FColors.neutralLight.background,
+      );
+      expect(tester.takeException(), isNull);
+    }, variant: TargetPlatformVariant({TargetPlatform.linux}));
+  }
   testWidgets('create archive opens the reusable compose file tree', (
     tester,
   ) async {
@@ -179,8 +262,12 @@ class _UnusedArchiveEngine implements ArchiveEngine {
 }
 
 class _FakeThemePreferenceStore implements ThemePreferenceStore {
+  _FakeThemePreferenceStore([this.mode = ThemeMode.system]);
+
+  final ThemeMode mode;
+
   @override
-  Future<ThemeMode> load() async => ThemeMode.system;
+  Future<ThemeMode> load() async => mode;
 
   @override
   Future<void> save(ThemeMode mode) async {}

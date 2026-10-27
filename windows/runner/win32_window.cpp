@@ -20,7 +20,7 @@ namespace {
 
 constexpr const wchar_t kWindowClassName[] = L"FLUTTER_RUNNER_WIN32_WINDOW";
 
-// Keep these logical dimensions aligned with WindowsTitleBar in Dart.
+// Keep these logical dimensions aligned with DesktopTitleBar in Dart.
 constexpr int kTitleBarHeight = 32;
 constexpr int kCaptionButtonWidth = 46;
 

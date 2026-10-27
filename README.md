@@ -88,7 +88,9 @@ bash tool/install_linux.sh
 `~/.local/share/icons/hicolor/256x256/apps/dev.jucier.Jucier.png` 即可取消注册
 （如果设置了 `$XDG_DATA_HOME`，则删除该目录下的对应文件）。
 
-Linux 在 X11 和 Wayland 上均使用 GTK 原生窗口边框。打开另一个压缩包时，会复用已有
+Linux 使用与应用明暗主题一致的自定义标题栏，提供最小化、最大化／还原和关闭按钮。
+拖动顶栏空白区域可以移动窗口，双击可以最大化／还原；X11 和 Wayland 均通过 GTK
+处理窗口操作，并保留原生边缘缩放和阴影。打开另一个压缩包时，会复用已有
 进程和窗口，并支持包含空格或 Unicode 字符的路径。主题、压缩性能、双击行为、
 智能解压、单项解压和文件列设置保存在 `$XDG_CONFIG_HOME/jucier/preferences.json`
 （默认为 `~/.config/jucier/preferences.json`）。按 Ctrl+, 可以打开设置。

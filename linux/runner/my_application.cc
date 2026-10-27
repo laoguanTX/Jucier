@@ -1,9 +1,6 @@
 #include "my_application.h"
 
 #include <flutter_linux/flutter_linux.h>
-#ifdef GDK_WINDOWING_X11
-#include <gdk/gdkx.h>
-#endif
 
 #include "flutter/generated_plugin_registrant.h"
 #include "platform_services.h"
@@ -33,32 +30,23 @@ static void my_application_activate(GApplication* application) {
   GtkWindow* window =
       GTK_WINDOW(gtk_application_window_new(GTK_APPLICATION(application)));
 
-  // Use a header bar when running in GNOME as this is the common style used
-  // by applications and is the setup most users will be using (e.g. Ubuntu
-  // desktop).
-  // If running on X and not using GNOME then just use a traditional title bar
-  // in case the window manager does more exotic layout, e.g. tiling.
-  // If running on Wayland assume the header bar will work (may need changing
-  // if future cases occur).
-  gboolean use_header_bar = TRUE;
-#ifdef GDK_WINDOWING_X11
-  GdkScreen* screen = gtk_window_get_screen(window);
-  if (GDK_IS_X11_SCREEN(screen)) {
-    const gchar* wm_name = gdk_x11_screen_get_window_manager_name(screen);
-    if (g_strcmp0(wm_name, "GNOME Shell") != 0) {
-      use_header_bar = FALSE;
-    }
-  }
-#endif
-  if (use_header_bar) {
-    GtkHeaderBar* header_bar = GTK_HEADER_BAR(gtk_header_bar_new());
-    gtk_widget_show(GTK_WIDGET(header_bar));
-    gtk_header_bar_set_title(header_bar, "Jucier");
-    gtk_header_bar_set_show_close_button(header_bar, TRUE);
-    gtk_window_set_titlebar(window, GTK_WIDGET(header_bar));
-  } else {
-    gtk_window_set_title(window, "Jucier");
-  }
+  gtk_window_set_title(window, "Jucier");
+  // Flutter paints the title bar. An empty GTK titlebar opts into client-side
+  // decorations on X11 and Wayland while retaining GTK's resize borders and
+  // shadows. Removing decorations entirely would also remove those borders.
+  GtkWidget* titlebar = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+  gtk_widget_set_name(titlebar, "jucier-titlebar");
+  g_autoptr(GtkCssProvider) titlebar_css = gtk_css_provider_new();
+  gtk_css_provider_load_from_data(
+      titlebar_css,
+      "#jucier-titlebar { min-height: 0; min-width: 0; padding: 0;"
+      " margin: 0; border: 0; background: transparent; box-shadow: none; }",
+      -1, nullptr);
+  gtk_style_context_add_provider(
+      gtk_widget_get_style_context(titlebar),
+      GTK_STYLE_PROVIDER(titlebar_css), GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+  gtk_widget_show(titlebar);
+  gtk_window_set_titlebar(window, titlebar);
 
   gtk_window_set_default_size(window, 1280, 720);
   gtk_window_set_icon_name(window, APPLICATION_ID);
@@ -84,7 +72,8 @@ static void my_application_activate(GApplication* application) {
 
   FlBinaryMessenger* messenger =
       fl_engine_get_binary_messenger(fl_view_get_engine(view));
-  self->platform_services = new PlatformServices(messenger, window);
+  self->platform_services = new PlatformServices(messenger, window,
+                                                 GTK_WIDGET(view));
   g_autoptr(FlStandardMethodCodec) codec = fl_standard_method_codec_new();
   self->archive_open_channel = fl_method_channel_new(
       messenger, "dev.jucier/archive_open", FL_METHOD_CODEC(codec));

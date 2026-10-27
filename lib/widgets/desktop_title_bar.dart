@@ -1,20 +1,22 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:forui/forui.dart';
 
-/// The native runner hit-tests the empty band for dragging and the middle
-/// button for Windows Snap Layouts. Keep its dimensions in sync with
-/// kTitleBarHeight/kCaptionButtonWidth in win32_window.cpp.
-class WindowsTitleBar extends StatefulWidget {
-  const WindowsTitleBar({super.key});
+/// Linux and Windows runners handle dragging in the empty band natively.
+/// Windows also hit-tests the maximize button for Snap Layouts.
+/// Keep the dimensions aligned with the native title-bar hit tests in
+/// linux/runner/platform_services.cc and windows/runner/win32_window.cpp.
+class DesktopTitleBar extends StatefulWidget {
+  const DesktopTitleBar({super.key});
 
   @override
-  State<WindowsTitleBar> createState() => _WindowsTitleBarState();
+  State<DesktopTitleBar> createState() => _DesktopTitleBarState();
 }
 
-class _WindowsTitleBarState extends State<WindowsTitleBar> {
+class _DesktopTitleBarState extends State<DesktopTitleBar> {
   static const _channel = MethodChannel('dev.jucier/window');
   bool _maximized = false;
   bool _compact = false;
@@ -51,7 +53,11 @@ class _WindowsTitleBarState extends State<WindowsTitleBar> {
   Widget build(BuildContext context) => ColoredBox(
     color: context.theme.colors.background,
     child: SizedBox(
-      key: const ValueKey('windows-title-bar'),
+      key: ValueKey(
+        defaultTargetPlatform == TargetPlatform.linux
+            ? 'linux-title-bar'
+            : 'windows-title-bar',
+      ),
       height: 32,
       child: Row(
         mainAxisAlignment: MainAxisAlignment.end,
